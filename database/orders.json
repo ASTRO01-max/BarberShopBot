@@ -105,5 +105,23 @@
         "barber_id": "shox",
         "date": "2025-07-28",
         "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Aliyev Valisher",
+        "phonenumber": "+998998072235",
+        "service_id": "haircut",
+        "barber_id": "hohruh",
+        "date": "2025-07-28",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Aliyev Valiboy",
+        "phonenumber": "+998998077788",
+        "service_id": "haircut",
+        "barber_id": "hohruh",
+        "date": "2025-07-28",
+        "time": "11:00"
     }
 ]

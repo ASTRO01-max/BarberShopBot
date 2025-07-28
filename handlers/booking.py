@@ -112,9 +112,9 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     )
 
     await callback.message.answer(
-        f"🕔 Navbatingiz belgilang va o‘z vaqtida keling.\n"
-        f"⏳ Navbatingizda belgilangan vaqtda xizmat ko‘rsatish boshlanadi.\n"
-        f"❗ Agar siz belgilangan vaqtdan 15 daqiqa ichida yetib kelmasangiz, navbatingiz avtomatik tarzda bekor qilinadi va boshqa mijozga xizmat ko‘rsatish boshlanadi."
+        f"🕔 Navbatingizni belgilang va o‘z vaqtida keling.\n"
+        f"⏳ Navbat bo‘yicha xizmat vaqti belgilangan paytda boshlanadi.\n"
+        f"❗15 daqiqa kechikkan taqdirda navbat avtomatik bekor qilinadi va boshqa mijozga o‘tadi."
     )
     
     await state.clear()
