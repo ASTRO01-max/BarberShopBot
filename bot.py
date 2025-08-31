@@ -13,18 +13,23 @@ from handlers import (
     contact,
     booking,
     back,
-    admin
+    # help_commands,
 )
+
+from handlers.admins import admin
 
 # Bot va Dispatcher obyektlari
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # /start komandasi uchun filter
-dp.message.register(
-    start.start_handler,
-    CommandStart()
-)
+# dp.message.register(
+#     start.start_handler,
+#     CommandStart()
+# )
+
+# dp.include_router(start.router)
+# dp.include_router(help_commands.router)
 
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(

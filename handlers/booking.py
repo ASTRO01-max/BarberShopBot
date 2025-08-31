@@ -9,7 +9,6 @@ from database.order_utils import get_booked_times, save_order, delete_last_order
 import json
 import os
 
-
 class UserState(StatesGroup):
     waiting_for_fullname = State()
     waiting_for_phonenumber = State()
@@ -120,6 +119,11 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
+    await callback.message.answer(
+        "Quyidagi menyudan birini tanlang:",
+        reply_markup=get_main_menu()
+    )
+
 router = Router()  # bu kerak
 
 @router.message(F.text == "❌Buyurtmani bekor qilish")
@@ -155,14 +159,14 @@ async def show_user_orders(message: Message):
     except json.JSONDecodeError:
         orders = []
 
-    # Foydalanuvchining buyurtmalari
+
     user_orders = [order for order in orders if str(order.get("user_id")) == str(user_id)]
 
     if not user_orders:
         await message.answer("🛒 Sizda hech qanday buyurtma topilmadi.")
         return
 
-    # Xabarni yig‘ish
+
     response = "🗂 *Sizning buyurtmalaringiz:*\n\n"
     for idx, order in enumerate(user_orders, start=1):
         sana = order.get("date", "Nomaʼlum")
@@ -172,12 +176,3 @@ async def show_user_orders(message: Message):
         response += f"{idx}. 📅 Sana: {sana}, ⏰ Vaqt: {vaqt}, 💈 Barber: {barber}, ✂️ Xizmat: {xizmat}\n"
 
     await message.answer(response, parse_mode="Markdown")
-
-    # await callback.message.answer(
-    #     "Quyidagi menyudan birini tanlang:",
-    #     reply_markup=get_main_menu()
-    # )
-
-
-
-

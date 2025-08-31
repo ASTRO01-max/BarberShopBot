@@ -5,7 +5,7 @@ services = {
 }
 
 barbers = [
-    {"id": "hohruh", "name": "Shohruh", "exp": "5 yil", "days": "Du-Shan-Pay"},
+    {"id": "shohruh", "name": "Shohruh", "exp": "5 yil", "days": "Du-Shan-Pay"},
     {"id": "aziz", "name": "Aziz", "exp": "3 yil", "days": "Se-Chor-Jum"},
     {"id": "abdulaziz", "name": "Abdulaziz", "exp": "6 yil", "days": "Du-Se-Chor"}
 ]
