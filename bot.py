@@ -1,7 +1,7 @@
 import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
-from config import TOKEN
+from cnfig import TOKEN
 from utils.logger import setup_logger
 from database.order_utils import save_order
 

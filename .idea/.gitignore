@@ -1,10 +1,45 @@
-# Default ignored files
-/shelf/
-/workspace.xml
+# === Python umumiy fayllar ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
 
+# === Virtual environment ===
+venv/
+.env/
+.venv/
+
+# === Maxfiy fayllar ===
 config.py
 .env
-__pycache__/
-*.pyc
-venv/
 
+# === IDE / Editor fayllari ===
+.vscode/
+.idea/
+*.iml
+.shelf/
+workspace.xml
+
+# === Log va cache fayllar ===
+*.log
+*.sqlite3
+*.db
+*.pid
+
+# === OS fayllar ===
+.DS_Store
+Thumbs.db
+
+# === Test coverage ===
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.pytest_cache/
+
+# === Build / dist fayllar ===
+build/
+dist/
+*.egg-info/
+.eggs/
