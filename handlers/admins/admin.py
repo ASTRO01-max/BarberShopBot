@@ -1,5 +1,5 @@
 from aiogram import Router, types, F
-from config import ADMINS  # admin ID lar
+from cnfig import ADMINS  # admin ID lar
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
