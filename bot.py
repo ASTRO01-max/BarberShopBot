@@ -1,7 +1,7 @@
 import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
-from cnfig import TOKEN
+from config import BOT_TOKEN
 from utils.logger import setup_logger
 from database.order_utils import save_order
 
@@ -19,7 +19,7 @@ from handlers import (
 from handlers.admins import admin
 
 # Bot va Dispatcher obyektlari
-bot = Bot(token=TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 dp.message.register(
