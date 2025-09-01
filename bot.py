@@ -29,6 +29,9 @@ dp.message.register(
 
 # dp.include_router(help_commands.router)
 
+#admin
+dp.include_router(admin.router)
+
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(
     services.show_services,
