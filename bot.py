@@ -30,7 +30,7 @@ dp.message.register(
 # dp.include_router(help_commands.router)
 
 #admin
-dp.include_router(admin.router)
+dp.include_router(admin.router) 
 
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(
@@ -99,7 +99,6 @@ dp.message.register(
 )
 
 dp.include_router(booking.router)
-dp.include_router(admin.router)
 
 # Asosiy ishga tushirish
 async def main():

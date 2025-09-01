@@ -6,16 +6,9 @@ from aiogram.fsm.state import StatesGroup, State
 from keyboards import booking_keyboards
 from keyboards.main_menu import *
 from database.order_utils import get_booked_times, save_order, delete_last_order_by_user
+from utils.states import UserState
 import json
 import os
-
-class UserState(StatesGroup):
-    waiting_for_fullname = State()
-    waiting_for_phonenumber = State()
-    waiting_for_service = State()
-    waiting_for_barber = State()
-    waiting_for_date = State()
-    waiting_for_time = State()
 
 async def start_booking(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(

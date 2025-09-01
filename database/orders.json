@@ -14,5 +14,41 @@
         "barber_id": "shox",
         "date": "2025-07-26",
         "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "ASTRO PLAYER",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "ASTRO player",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "aziz",
+        "date": "2025-09-02",
+        "time": "15:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "g'aybullayev muhammadyusuf",
+        "phonenumber": "+998901234567",
+        "service_id": "beard",
+        "barber_id": "aziz",
+        "date": "2025-09-01",
+        "time": "10:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammad Yusuf",
+        "phonenumber": "+998901234567",
+        "service_id": "combo",
+        "barber_id": "abdulaziz",
+        "date": "2025-09-01",
+        "time": "17:00"
     }
 ]
