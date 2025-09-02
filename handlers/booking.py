@@ -3,8 +3,10 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from database.static_data import services, barbers
 from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from keyboards import booking_keyboards
 from keyboards.main_menu import *
+from keyboards.main_buttons import phone_request_keyboard, keyboard
 from database.order_utils import get_booked_times, save_order, delete_last_order_by_user
 from utils.states import UserState
 import json
@@ -23,22 +25,32 @@ async def process_fullname(message: types.Message, state: FSMContext):
         await message.answer("Iltimos, to‘liq ismingizni kiriting (ism va familiya).")
         return
     await state.update_data(fullname=fullname)
+
     await message.answer(
-        "Iltimos, telefon raqamingizni kiriting (masalan, +998901234567):"
+        "Iltimos, telefon raqamingizni kiriting yoki tugma orqali yuboring:",
+        reply_markup=phone_request_keyboard
     )
     await state.set_state(UserState.waiting_for_phonenumber)
 
 async def process_phonenumber(message: types.Message, state: FSMContext):
-    phonenumber = message.text.strip()
+    # Tugma orqali yuborilgan telefon raqamni olish
+    if message.contact:
+        phonenumber = message.contact.phone_number
+    else:
+        phonenumber = message.text.strip()
+
     if not phonenumber.startswith("+998") or len(phonenumber) != 13:
         await message.answer("Iltimos, telefon raqamini to‘g‘ri kiriting (masalan, +998901234567).")
         return
+
     await state.update_data(phonenumber=phonenumber)
+    await message.answer("Raqamingiz qabul qilindi ✅", reply_markup=keyboard) 
     await message.answer(
         "💈 Xizmat turini tanlang:",
         reply_markup=booking_keyboards.service_keyboard()
     )
     await state.set_state(UserState.waiting_for_service)
+
 
 async def book_step1(callback: types.CallbackQuery, state: FSMContext):
     service_id = callback.data.split("_")[1]
@@ -50,9 +62,12 @@ async def book_step1(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(UserState.waiting_for_barber)
     await callback.answer()
 
+
+# 2-bosqich: Sana tanlash
 async def book_step2(callback: types.CallbackQuery, state: FSMContext):
     _, service_id, barber_id = callback.data.split("_")
-    await state.update_data(barber_id=barber_id)
+    await state.update_data(service_id=service_id, barber_id=barber_id)
+
     await callback.message.edit_text(
         "📅 Sana tanlang:",
         reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
@@ -60,6 +75,8 @@ async def book_step2(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(UserState.waiting_for_date)
     await callback.answer()
 
+
+# 3-bosqich: Vaqt tanlash
 async def book_step3(callback: types.CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date = callback.data.split("_")
     await state.update_data(date=date)
@@ -67,12 +84,36 @@ async def book_step3(callback: types.CallbackQuery, state: FSMContext):
     keyboard = booking_keyboards.time_keyboard(service_id, barber_id, date)
 
     if keyboard is None:
-        await callback.message.edit_text("❌ Kechirasiz, bu kunga barcha vaqtlar band.")
+        back_markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🔙 Orqaga",
+                    callback_data=f"back_date_{service_id}_{barber_id}"
+                )]
+            ]
+        )
+        await callback.message.edit_text(
+            "❌ Kechirasiz, bu kunga barcha vaqtlar band.",
+            reply_markup=back_markup
+        )
     else:
         await callback.message.edit_text("⏰ Vaqt tanlang:", reply_markup=keyboard)
 
     await state.set_state(UserState.waiting_for_time)
     await callback.answer()
+
+
+# Orqaga qaytish handleri
+async def back_to_date(callback: types.CallbackQuery, state: FSMContext):
+    _, _, service_id, barber_id = callback.data.split("_")
+
+    await callback.message.edit_text(
+        "📅 Sana tanlang:",
+        reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+    )
+    await state.set_state(UserState.waiting_for_date)
+    await callback.answer()
+
 
 
 async def confirm(callback: types.CallbackQuery, state: FSMContext):
@@ -116,6 +157,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         "Quyidagi menyudan birini tanlang:",
         reply_markup=get_main_menu()
     )
+
 
 router = Router()  # bu kerak
 

@@ -11,3 +11,11 @@ class UserState(StatesGroup):
 class AdminStates(StatesGroup):
     adding_service = State()
     adding_barber = State()
+    adding_service = State()           # Servis nomini kutish
+    adding_service_price = State()     # Servis narxini kutish
+    adding_service_duration = State() 
+    waiting_for_message = State()  
+
+class BroadcastState(StatesGroup):
+    waiting_for_message = State()
+    

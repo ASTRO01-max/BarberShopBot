@@ -50,5 +50,77 @@
         "barber_id": "abdulaziz",
         "date": "2025-09-01",
         "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammad Yusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "10:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "ASTRO PLAYER",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "15:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Poulatov Mamin",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "11:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Muhammad Yusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "13:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Abdullayev salohiddin",
+        "phonenumber": "+998998071134",
+        "service_id": "beard",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Ibrohimov Jo'rabek",
+        "phonenumber": "+998998072325",
+        "service_id": "beard",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "10:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammad Yusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "beard",
+        "barber_id": "shohruh",
+        "date": "2025-09-02",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammad Yusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-02",
+        "time": "17:00"
     }
 ]

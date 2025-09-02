@@ -4,6 +4,8 @@ services = {
     "combo": ("💎 Komplekt", 70000, "45 daqiqa")
 }
 
+
+
 barbers = [
     {"id": "shohruh", "name": "Shohruh", "exp": "5 yil", "days": "Du-Shan-Pay"},
     {"id": "aziz", "name": "Aziz", "exp": "3 yil", "days": "Se-Chor-Jum"},

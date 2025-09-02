@@ -1,77 +1,77 @@
 from aiogram import Router, types, F
-from config import ADMINS
-import json
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from config import ADMINS
+from utils.states import AdminStates
+from database import services_barbers_utils as sb_utils
+import re
 
 router = Router()
 
-ORDERS_PER_PAGE = 5  # har safar nechta buyurtma ko‘rsatish
 
 
-def get_orders_page(orders, page: int):
-    start = page * ORDERS_PER_PAGE
-    end = start + ORDERS_PER_PAGE
-    sliced_orders = orders[start:end]
-
-    response = "📋 Buyurtmalar ro'yxati:\n\n"
-    for idx, order in enumerate(sliced_orders, start=start + 1):
-        response += (
-            f"📌 Buyurtma {idx}\n"
-            f"👤 Mijoz: {order.get('fullname')}\n"
-            f"💈 Barber: {order.get('barber_id')}\n"
-            f"✂️ Xizmat: {order.get('service_id')}\n"
-            f"🗓 Sana: {order.get('date')}\n"
-            f"⏰ Vaqt: {order.get('time')}\n\n"
-        )
-
-    # Inline button qo‘shish (agar keyingi sahifa mavjud bo‘lsa)
-    buttons = []
-    if end < len(orders):  # keyingi sahifa bor
-        buttons.append([InlineKeyboardButton(text="➡️ Keyingi ro'yhat", callback_data=f"next_page:{page+1}")])
-
-    return response, InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
-
-
-@router.message(F.text == "📁 Buyurtmalar ro'yxati")
-async def show_all_orders(message: types.Message, state: FSMContext):
+@router.message(F.text == "💈 Servis qo'shish")
+async def add_service_prompt(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         return
+    await state.set_state(AdminStates.adding_service)
+    await message.answer("📝 Yangi servis nomini kiriting:")
 
-    orders_file = "database/orders.json"
-    try:
-        with open(orders_file, "r", encoding="utf-8") as file:
-            orders = json.load(file)
-    except:
-        orders = []
 
-    if not orders:
-        await message.answer("📂 Buyurtmalar topilmadi.")
+@router.message(AdminStates.adding_service)
+async def save_service_name(message: types.Message, state: FSMContext):
+    service_name = message.text.strip()
+
+    # mavjudligini tekshirish (fayldan yangisini olish)
+    services = sb_utils.load_services()
+    for val in services.values():
+        if val[0].lower() == service_name.lower():
+            await message.answer("⚠️ Bu servis allaqachon mavjud.")
+            await state.clear()
+            return
+
+    # xavfsiz ID yaratish
+    raw_id = service_name.lower().replace(" ", "_")
+    service_id = re.sub(r"[^a-z0-9_]", "", raw_id)
+
+    base_id = service_id
+    i = 1
+    while service_id in services:
+        service_id = f"{base_id}_{i}"
+        i += 1
+
+    # vaqtinchalik saqlash
+    await state.update_data(service_id=service_id, service_name=service_name)
+    await state.set_state(AdminStates.adding_service_price)
+    await message.answer("💵 Servis narxini kiriting (so'mda, faqat raqam):")
+
+
+@router.message(AdminStates.adding_service_price)
+async def save_service_price(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("❌ Narx faqat raqam bo‘lishi kerak. Qayta kiriting:")
         return
 
-    # birinchi sahifa
-    page = 0
-    response, markup = get_orders_page(orders, page)
-
-    sent_msg = await message.answer(response, reply_markup=markup)
-    await state.update_data(orders=orders, current_msg=sent_msg.message_id)
+    await state.update_data(price=int(message.text.strip()))
+    await state.set_state(AdminStates.adding_service_duration)
+    await message.answer("⏰ Servis davomiyligini kiriting (masalan: 30 daqiqa):")
 
 
-@router.callback_query(F.data.startswith("next_page"))
-async def paginate_orders(callback: types.CallbackQuery, state: FSMContext):
+@router.message(AdminStates.adding_service_duration)
+async def save_service_duration(message: types.Message, state: FSMContext):
+    duration = message.text.strip()
     data = await state.get_data()
-    orders = data.get("orders", [])
-    page = int(callback.data.split(":")[1])
 
-    response, markup = get_orders_page(orders, page)
+    service_id = data["service_id"]
+    service_name = data["service_name"]
+    price = data["price"]
 
-    # eski xabarni o‘chirib tashlash
-    try:
-        await callback.bot.delete_message(callback.message.chat.id, data["current_msg"])
-    except:
-        pass
+    # fayldan yangisini olish va qo‘shish
+    services = sb_utils.load_services()
+    services[service_id] = (service_name, price, duration)
+    sb_utils.save_services(services)
 
-    # yangi xabar yuborish
-    sent_msg = await callback.message.answer(response, reply_markup=markup)
-    await state.update_data(current_msg=sent_msg.message_id)
-    await callback.answer()
+    await message.answer(
+        f"✅ Servis qo‘shildi:\n\n"
+        f"✂️ {service_name} – {price} so'm ({duration})"
+    )
+    await state.clear()
