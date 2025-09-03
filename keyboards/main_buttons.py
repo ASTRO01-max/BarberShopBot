@@ -3,7 +3,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 # Asosiy keyboard
 cancel_order_btn = KeyboardButton(text="❌Buyurtmani bekor qilish")
 order_history_btn = KeyboardButton(text="🗂Buyurtmalar tarixi")
-user = KeyboardButton(text="Foydalanuvchini saqlash")
+user = KeyboardButton(text="📥Foydalanuvchini saqlash")
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
