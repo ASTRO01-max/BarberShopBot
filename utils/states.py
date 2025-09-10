@@ -18,4 +18,7 @@ class AdminStates(StatesGroup):
 
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
-    
+
+class UserForm(StatesGroup):
+    fullname = State()
+    phone = State()

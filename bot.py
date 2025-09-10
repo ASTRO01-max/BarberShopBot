@@ -4,6 +4,7 @@ from aiogram.filters import CommandStart
 from config import BOT_TOKEN
 from utils.logger import setup_logger
 from database.order_utils import save_order
+from admins import router as admins_router
 
 # Handlers importlari
 from handlers import (
@@ -13,10 +14,7 @@ from handlers import (
     contact,
     booking,
     back,
-    # help_commands,
 )
-
-from handlers.admins import admin
 
 # Bot va Dispatcher obyektlari
 bot = Bot(token=BOT_TOKEN)
@@ -27,10 +25,8 @@ dp.message.register(
     CommandStart()
 )
 
-# dp.include_router(help_commands.router)
-
-#admin
-dp.include_router(admin.router) 
+#ADMIN_PANEL
+dp.include_router(admins_router)
 
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(

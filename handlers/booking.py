@@ -5,10 +5,12 @@ from database.static_data import services, barbers
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from keyboards import booking_keyboards
-from keyboards.main_menu import *
+from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, keyboard
 from database.order_utils import get_booked_times, save_order, delete_last_order_by_user
-from utils.states import UserState
+from utils.states import UserState, UserForm
+from utils.validators import *
+from database.user_utils import save_user
 import json
 import os
 
@@ -211,3 +213,34 @@ async def show_user_orders(message: Message):
         response += f"{idx}. 📅 Sana: {sana}, ⏰ Vaqt: {vaqt}, 💈 Barber: {barber}, ✂️ Xizmat: {xizmat}\n"
 
     await message.answer(response, parse_mode="Markdown")
+
+@router.message(F.text == "📥Foydalanuvchini saqlash")
+async def ask_fullname(message: types.Message, state: FSMContext):
+    await state.set_state(UserForm.fullname)
+    await message.answer("👤 Iltimos, to‘liq ismingizni kiriting (Masalan: Anvar Karimov)")
+
+@router.message(UserForm.fullname)
+async def process_fullname(message: types.Message, state: FSMContext):
+    fullname = message.text.strip()
+    if not validate_fullname(fullname):
+        await message.answer("❌ Ism noto‘g‘ri formatda. Qaytadan kiriting (Masalan: Ali Valiyev)")
+        return
+    await state.update_data(fullname=fullname)
+    await state.set_state(UserForm.phone)
+    await message.answer("📞 Endi telefon raqamingizni kiriting (+998901234567 formatida)")
+
+@router.message(UserForm.phone)
+async def process_phone(message: types.Message, state: FSMContext):
+    phone = message.text.strip()
+    if not validate_phone(phone):
+        await message.answer("❌ Telefon raqami noto‘g‘ri. Iltimos, +998 bilan boshlang.")
+        return
+
+    user_data = await state.get_data()
+    user_data["phone"] = phone
+
+    save_user(user_data)
+    await state.clear()
+
+    await message.answer(f"✅ Ma’lumotlar saqlandi!\n\n👤 Ism: {user_data['fullname']}\n📞 Tel: {user_data['phone']}",
+                         reply_markup=get_main_menu())
