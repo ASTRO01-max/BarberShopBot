@@ -2,30 +2,40 @@ from aiogram import F, types, Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from database.static_data import services, barbers
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from keyboards import booking_keyboards
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, keyboard
 from database.order_utils import get_booked_times, save_order, delete_last_order_by_user
 from utils.states import UserState, UserForm
 from utils.validators import *
-from database.user_utils import save_user
+from database.users_utils import save_user, get_user
 import json
 import os
 
 async def start_booking(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "Iltimos, to‘liq ismingizni kiriting (masalan, Aliyev Valijon):"
-    )
-    await state.set_state(UserState.waiting_for_fullname)
+    user_id = callback.from_user.id
+    user = get_user(user_id)
+
+    if user:
+        # ✅ User mavjud → to‘g‘ridan-to‘g‘ri xizmat tanlash
+        await book_step1()
+    else:
+        # ❌ User mavjud emas → ism so‘raymiz
+        await callback.message.edit_text(
+            "Iltimos, to‘liq ismingizni kiriting (masalan, Aliyev Valijon):"
+        )
+        await state.set_state(UserState.waiting_for_fullname)
+
     await callback.answer()
+
 
 async def process_fullname(message: types.Message, state: FSMContext):
     fullname = message.text.strip()
     if len(fullname.split()) < 2:
-        await message.answer("Iltimos, to‘liq ismingizni kiriting (ism va familiya).")
+        await message.answer("Iltimos, ism va familiyani kiriting (masalan: Aliyev Valijon).")
         return
+
     await state.update_data(fullname=fullname)
 
     await message.answer(
@@ -34,18 +44,29 @@ async def process_fullname(message: types.Message, state: FSMContext):
     )
     await state.set_state(UserState.waiting_for_phonenumber)
 
+
 async def process_phonenumber(message: types.Message, state: FSMContext):
     # Tugma orqali yuborilgan telefon raqamni olish
-    if message.contact:
-        phonenumber = message.contact.phone_number
-    else:
-        phonenumber = message.text.strip()
+    phonenumber = message.contact.phone_number if message.contact else message.text.strip()
 
     if not phonenumber.startswith("+998") or len(phonenumber) != 13:
         await message.answer("Iltimos, telefon raqamini to‘g‘ri kiriting (masalan, +998901234567).")
         return
 
+    # State ichidan fullname olish
+    user_data = await state.get_data()
+    fullname = user_data.get("fullname", "Ism kiritilmagan")
+
+    # Yangi userni faylga saqlash
+    save_user({
+        "id": message.from_user.id,   # Telegram user id
+        "fullname": fullname,
+        "phone": phonenumber
+    })
+
+    # State ichiga telefonni saqlash
     await state.update_data(phonenumber=phonenumber)
+
     await message.answer("Raqamingiz qabul qilindi ✅", reply_markup=keyboard) 
     await message.answer(
         "💈 Xizmat turini tanlang:",
@@ -63,7 +84,6 @@ async def book_step1(callback: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(UserState.waiting_for_barber)
     await callback.answer()
-
 
 # 2-bosqich: Sana tanlash
 async def book_step2(callback: types.CallbackQuery, state: FSMContext):
@@ -117,18 +137,28 @@ async def back_to_date(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-
 async def confirm(callback: types.CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date, time = callback.data.split("_")
-    user_data = await state.get_data()
     user_id = callback.from_user.id
+    user = get_user(user_id)
+
+    user_data = await state.get_data()
+
+    # Agar user.json faylida mavjud bo‘lsa undan foydalanamiz
+    if user:
+        fullname = user["fullname"]
+        phone = user["phone"]
+    else:
+        fullname = user_data.get("fullname")
+        phone = user_data.get("phonenumber")
+
     service_name = services[service_id][0]
     barber_name = next((b['name'] for b in barbers if b['id'] == barber_id), "Noma'lum")
 
     order = {
         "user_id": user_id,
-        "fullname": user_data["fullname"],
-        "phonenumber": user_data["phonenumber"],
+        "fullname": fullname,
+        "phonenumber": phone,
         "service_id": service_id,
         "barber_id": barber_id,
         "date": date,
@@ -138,20 +168,14 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(
         f"✅ Siz muvaffaqiyatli navbat oldingiz:\n"
-        f"👤Ismingiz: {user_data['fullname']}\n"
-        f"📱Telefon raqamingiz: {user_data['phonenumber']}\n"
+        f"👤Ismingiz: {fullname}\n"
+        f"📱Telefon: {phone}\n"
         f"💈Xizmat: {service_name}\n"
         f"👨‍💼Usta: {barber_name}\n"
         f"🗓Sana: {date}\n"
         f"🕔Vaqt: {time}"
     )
 
-    await callback.message.answer(
-        f"🕔 Navbatingizni belgilang va o‘z vaqtida keling.\n"
-        f"⏳ Navbat bo‘yicha xizmat vaqti belgilangan paytda boshlanadi.\n"
-        f"❗15 daqiqa kechikkan taqdirda navbat avtomatik bekor qilinadi va boshqa mijozga o‘tadi."
-    )
-    
     await state.clear()
     await callback.answer()
 
