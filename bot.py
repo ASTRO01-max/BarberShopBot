@@ -14,6 +14,7 @@ from handlers import (
     contact,
     booking,
     back,
+    main_btn_handle
 )
 
 # Bot va Dispatcher obyektlari
@@ -51,6 +52,8 @@ dp.callback_query.register(
     booking.start_booking,
     lambda c: c.data == "book"
 )
+
+dp.include_router(main_btn_handle.router)
 
 # FSM - Xizmat tanlash
 dp.callback_query.register(
@@ -93,8 +96,6 @@ dp.message.register(
     booking.process_phonenumber,
     booking.UserState.waiting_for_phonenumber
 )
-
-dp.include_router(booking.router)
 
 # Asosiy ishga tushirish
 async def main():

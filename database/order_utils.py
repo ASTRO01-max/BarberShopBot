@@ -8,12 +8,9 @@ ORDER_FILE = Path("database/orders.json")
 
 
 def load_orders() -> list:
-    """
-    Barcha buyurtmalarni yuklaydi. Fayl bo'lmasa yoki buzilgan bo'lsa bo'sh ro'yxat qaytaradi.
-    """
+    """Barcha buyurtmalarni yuklaydi, xatoga chidamli."""
     if not ORDER_FILE.exists():
         return []
-
     try:
         with ORDER_FILE.open("r", encoding="utf-8") as f:
             return json.load(f)
@@ -22,13 +19,25 @@ def load_orders() -> list:
 
 def save_order(order: dict):
     """
-    Yangi buyurtmani saqlaydi. Avvalgi buyurtmalarga qo'shiladi.
+    Yangi buyurtmani saqlaydi.
+    Fayl mavjud bo‘lmasa avtomatik yaratiladi.
     """
     orders = load_orders()
-    orders.append(order)
 
-    ORDER_FILE.parent.mkdir(parents=True, exist_ok=True)  # Katalog mavjud bo'lmasa yaratadi
+    # ✅ Faqat kerakli maydonlarni saqlash
+    new_order = {
+        "user_id": order.get("user_id"),
+        "fullname": order.get("fullname"),
+        "phonenumber": order.get("phonenumber"),
+        "service_id": order.get("service_id"),
+        "barber_id": order.get("barber_id"),
+        "date": order.get("date"),
+        "time": order.get("time"),
+    }
 
+    orders.append(new_order)
+
+    ORDER_FILE.parent.mkdir(parents=True, exist_ok=True)
     with ORDER_FILE.open("w", encoding="utf-8") as f:
         json.dump(orders, f, ensure_ascii=False, indent=4)
 
