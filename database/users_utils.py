@@ -66,3 +66,37 @@ def get_user_by_phone(phone):
         return None
 
     return next((u for u in users if u.get("phone") == phone), None)
+
+def update_user(user_id: int, new_fullname: str = None, new_phone: str = None) -> bool:
+    """
+    Foydalanuvchi ma'lumotlarini yangilash.
+    :param user_id: Telegram foydalanuvchi ID
+    :param new_fullname: Yangi ism (ixtiyoriy)
+    :param new_phone: Yangi telefon raqami (ixtiyoriy)
+    :return: True agar yangilansa, False agar foydalanuvchi topilmasa
+    """
+    file_path = "database/users.json"
+    if not os.path.exists(file_path):
+        return False
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    except json.JSONDecodeError:
+        return False
+
+    updated = False
+    for user in users:
+        if str(user.get("id")) == str(user_id):
+            if new_fullname:
+                user["fullname"] = new_fullname
+            if new_phone:
+                user["phone"] = new_phone
+            updated = True
+            break
+
+    if updated:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=4, ensure_ascii=False)
+
+    return updated

@@ -2,11 +2,11 @@ from aiogram import F, types, Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-from utils.states import UserForm
+from utils.states import UserState, UserForm
 from database.order_utils import delete_last_order_by_user, load_orders
 from keyboards.main_menu import get_main_menu
 from utils.validators import validate_fullname, validate_phone
-from database.users_utils import save_user
+from database.users_utils import save_user, update_user, get_user
 from datetime import datetime
 
 router = Router()
@@ -133,3 +133,42 @@ async def process_phone(message: types.Message, state: FSMContext):
         f"✅ Ma’lumotlar saqlandi!\n\n👤 Ism: {user_data['fullname']}\n📞 Tel: {user_data['phone']}",
         reply_markup=get_main_menu()
     )
+
+
+@router.message(F.text == "📥Foydalanuvchi ma'lumotlarini o'zgartirish")
+async def ask_new_fullname(message: Message, state: FSMContext):
+    await message.answer("✏️ Yangi to‘liq ismingizni kiriting:")
+    await state.set_state(UserState.waiting_for_new_fullname)
+
+@router.message(UserState.waiting_for_new_fullname)
+async def process_new_fullname(message: Message, state: FSMContext):
+    await state.update_data(new_fullname=message.text.strip())
+    await message.answer("📱 Endi yangi telefon raqamingizni kiriting (+998 bilan):")
+    await state.set_state(UserState.waiting_for_new_phone)
+
+@router.message(UserState.waiting_for_new_phone)
+async def process_new_phone(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    if not phone.startswith("+998") or len(phone) != 13:
+        await message.answer("❌ Telefon raqam noto‘g‘ri. Masalan: +998901234567")
+        return
+
+    user_data = await state.get_data()
+    new_fullname = user_data.get("new_fullname")
+
+    success = update_user(
+        user_id=message.from_user.id,
+        new_fullname=new_fullname,
+        new_phone=phone
+    )
+
+    if success:
+        await message.answer(
+            f"✅ Ma'lumotlaringiz yangilandi!\n\n"
+            f"👤 Ism: {new_fullname}\n"
+            f"📱 Telefon: {phone}"
+        )
+    else:
+        await message.answer("❌ Foydalanuvchi topilmadi yoki xatolik yuz berdi.")
+
+    await state.clear()

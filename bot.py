@@ -14,7 +14,8 @@ from handlers import (
     contact,
     booking,
     back,
-    main_btn_handle
+    main_btn_handle,
+    support
 )
 
 # Bot va Dispatcher obyektlari
@@ -28,6 +29,9 @@ dp.message.register(
 
 #ADMIN_PANEL
 dp.include_router(admins_router)
+
+#SUPPORT_PANEL
+dp.include_router(support.router)
 
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(

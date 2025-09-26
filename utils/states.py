@@ -1,5 +1,7 @@
 from aiogram.fsm.state import StatesGroup, State
 
+from aiogram.fsm.state import StatesGroup, State
+
 class UserState(StatesGroup):
     waiting_for_fullname = State()
     waiting_for_phonenumber = State()
@@ -7,6 +9,10 @@ class UserState(StatesGroup):
     waiting_for_barber = State()
     waiting_for_date = State()
     waiting_for_time = State()
+    # yangi qo‘shiladigan state
+    waiting_for_new_fullname = State()
+    waiting_for_new_phone = State()   # 🔹 shu state yo‘q bo‘lgani uchun xato chiqyapti
+
 
 class AdminStates(StatesGroup):
     adding_service = State()
