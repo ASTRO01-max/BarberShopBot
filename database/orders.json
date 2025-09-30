@@ -116,11 +116,11 @@
     },
     {
         "user_id": 5917410411,
-        "date": "2025-09-25",
-        "time": "13:00",
+        "fullname": "G'aybullayev Muhammadyusuf",
+        "phonenumber": "+998998071134",
         "service_id": "haircut",
-        "service": null,
         "barber_id": "shohruh",
-        "barber": null
+        "date": "2025-09-30",
+        "time": "11:00"
     }
 ]

@@ -5,6 +5,7 @@ from config import BOT_TOKEN
 from utils.logger import setup_logger
 from database.order_utils import save_order
 from admins import router as admins_router
+from sql.db import init_db
 
 # Handlers importlari
 from handlers import (
@@ -104,6 +105,7 @@ dp.message.register(
 # Asosiy ishga tushirish
 async def main():
     setup_logger()
+    await init_db()
     print("Bot ishga tushdi...")
     await dp.start_polling(bot)
 
