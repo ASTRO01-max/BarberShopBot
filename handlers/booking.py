@@ -1,19 +1,21 @@
-from aiogram import types
-from aiogram.types import Message
+import logging
+from aiogram import types, F, Router
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from database.static_data import services, barbers
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from keyboards import booking_keyboards
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
-# handlers/booking.py (boshida)
-from sql.db_order_utils import save_order, get_booked_times, delete_last_order_by_user
-# yoki agar siz modul nomini boshqacha qo'ysangiz: from database import db_order_utils as db_utils
-
+from sql.db_order_utils import save_order
 from utils.states import UserState
 from utils.validators import *
-from database.users_utils import save_user, get_user
+from sql.db_order_utils import save_order
+from sql.db_users_utils import get_user, save_user
+from datetime import datetime
 
+logger = logging.getLogger(__name__)
+router = Router()
 
 # --- 1-qadam: Boshlash ---
 async def start_booking(callback: types.CallbackQuery, state: FSMContext):
@@ -21,14 +23,12 @@ async def start_booking(callback: types.CallbackQuery, state: FSMContext):
     user = get_user(user_id)
 
     if user:
-        # Agar foydalanuvchi mavjud bo‘lsa → xizmat tanlashdan boshlanadi
         await callback.message.edit_text(
             "💈 Xizmat turini tanlang:",
             reply_markup=booking_keyboards.service_keyboard()
         )
         await state.set_state(UserState.waiting_for_service)
     else:
-        # Agar foydalanuvchi yo‘q bo‘lsa → ism so‘raymiz
         await callback.message.edit_text(
             "Iltimos, to‘liq ismingizni kiriting (masalan, Aliyev Valijon):"
         )
@@ -62,7 +62,6 @@ async def process_phonenumber(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     fullname = user_data.get("fullname", "Ism kiritilmagan")
 
-    # Foydalanuvchini saqlash
     save_user({
         "id": message.from_user.id,
         "fullname": fullname,
@@ -71,7 +70,7 @@ async def process_phonenumber(message: types.Message, state: FSMContext):
 
     await state.update_data(phonenumber=phonenumber)
 
-    await message.answer("Raqamingiz qabul qilindi ✅", reply_markup=get_dynamic_main_keyboard(message.from_user.id))
+    await message.answer("📱Raqamingiz qabul qilindi ✅", reply_markup=get_dynamic_main_keyboard(message.from_user.id))
     await message.answer(
         "💈 Xizmat turini tanlang:",
         reply_markup=booking_keyboards.service_keyboard()
@@ -106,7 +105,7 @@ async def book_step3(callback: types.CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date = callback.data.split("_")
     await state.update_data(date=date)
 
-    keyboard = booking_keyboards.time_keyboard(service_id, barber_id, date)
+    keyboard = await booking_keyboards.time_keyboard(service_id, barber_id, date)
 
     if keyboard is None:
         back_markup = InlineKeyboardMarkup(
@@ -137,48 +136,176 @@ async def back_to_date(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(UserState.waiting_for_date)
     await callback.answer()
 
-# --- 7-qadam: Tasdiqlash ---
-async def confirm(callback: types.CallbackQuery, state: FSMContext):
-    _, service_id, barber_id, date, time = callback.data.split("_")
-    user_data = await state.get_data()
-    user_id = callback.from_user.id
 
-    service_name = services[service_id][0]
-    barber_name = next((b['name'] for b in barbers if b['id'] == barber_id), "Noma'lum")
-
-    order = {
-        "user_id": user_id,
-        "fullname": user_data.get("fullname", "Noma'lum"),
-        "phonenumber": user_data.get("phonenumber", "Noma'lum"),
-        "service_id": service_id,
-        "barber_id": barber_id,
-        "date": date,   # format: "YYYY-MM-DD"
-        "time": time    # format: "HH:MM"
-    }
-
-    # ⚠️ async save — qat'iy await bilan
-    saved = await save_order(order)
-
-    if saved is None:
-        # DB dan None qaytsa, xatolik haqida xabar bering va log qoldiring
-        await callback.message.answer("❌ Buyurtma saqlanmadi. Iltimos, administrator bilan bog'laning.")
+# ✅ Tasdiqlash bosqichi
+@router.callback_query(F.data.startswith("confirm_"))
+async def confirm(callback: CallbackQuery, state: FSMContext):
+    """
+    Buyurtmani yakuniy tasdiqlash — foydalanuvchidan to‘plangan barcha ma’lumotlarni DB ga saqlaydi.
+    """
+    data = callback.data or ""
+    if not data.startswith("confirm_"):
         await callback.answer()
         return
 
-    # muvaffaqiyatli saqlanganda foydalanuvchiga xabar
+    parts = data.split("_", 4)
+    if len(parts) != 5:
+        await callback.message.answer("⚠️ So'rov formati noto‘g‘ri. Iltimos, menyudan qayta tanlang.")
+        await callback.answer()
+        return
+
+    _, service_id, barber_id, date_str, time_str = parts
+    user_id = callback.from_user.id
+
+    # 1️⃣ State’dan ma’lumotlarni olish
+    user_state = await state.get_data()
+    fullname = user_state.get("fullname")
+    phone = user_state.get("phonenumber") or user_state.get("phone")
+
+    # 2️⃣ Agar state bo‘sh bo‘lsa — users jadvalidan olish
+    if (not fullname) or (not phone):
+        try:
+            user = await get_user(user_id)
+            if user:
+                fullname = fullname or getattr(user, "fullname", None)
+                phone = phone or getattr(user, "phone", None)
+        except Exception as e:
+            logger.exception("get_user xatoligi: %s", e)
+
+    # 3️⃣ Default qiymatlar
+    fullname = fullname or "Noma'lum"
+    phone = phone or "Noma'lum"
+
+    # 4️⃣ Sana va vaqtni to‘g‘ri formatga keltirish
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except Exception:
+        date_obj = date_str  # agar DB string saqlasa, shu qoldiriladi
+
+    try:
+        time_obj = datetime.strptime(time_str, "%H:%M").time()
+    except Exception:
+        time_obj = time_str
+
+    # 5️⃣ Buyurtma ma’lumotlari
+    order = {
+        "user_id": user_id,
+        "fullname": fullname,
+        "phonenumber": phone,
+        "service_id": service_id,
+        "barber_id": barber_id,
+        "date": date_obj,
+        "time": time_obj,
+    }
+
+    # 6️⃣ DB ga saqlash
+    try:
+        await save_order(order)
+    except Exception as e:
+        logger.exception("DB save error: %s", e)
+        await callback.message.answer(
+            "❌ Buyurtmangizni saqlashda xato yuz berdi. Iltimos, keyinroq urinib ko‘ring."
+        )
+        await callback.answer()
+        return
+
+    # 7️⃣ Muvaffaqiyat xabari
     await callback.message.edit_text(
-        f"✅ Siz muvaffaqiyatli navbat oldingiz:\n"
-        f"👤 Ismingiz: {order['fullname']}\n"
-        f"📱 Telefon: {order['phonenumber']}\n"
-        f"💈 Xizmat: {service_name}\n"
-        f"👨‍💼 Usta: {barber_name}\n"
-        f"🗓 Sana: {date}\n"
-        f"🕔 Vaqt: {time}"
+        f"✅ *Buyurtmangiz muvaffaqiyatli saqlandi!*\n\n"
+        f"👤 Ism: {fullname}\n"
+        f"📱 Telefon: {phone}\n"
+        f"💈 Xizmat: {service_id}\n"
+        f"👨‍💼 Usta: {barber_id}\n"
+        f"📅 Sana: {date_str}\n"
+        f"🕔 Vaqt: {time_str}",
+        parse_mode="Markdown"
     )
 
     await state.clear()
-    await callback.answer()
+    await callback.answer("✅ Buyurtma tasdiqlandi.")
     await callback.message.answer(
         "Quyidagi menyudan birini tanlang:",
         reply_markup=get_main_menu()
     )
+
+# async def confirm(callback: types.CallbackQuery, state: FSMContext):
+
+#     data = callback.data or ""
+#     if not data.startswith("confirm_"):
+#         await callback.answer()
+#         return
+
+#     parts = data.split("_", 4)
+#     if len(parts) != 5:
+#         await callback.message.answer("⚠️ So'rov formati noto'g'ri. Iltimos menyudan qayta tanlang.")
+#         await callback.answer()
+#         return
+
+#     _, service_id, barber_id, date_str, time_str = parts
+
+#     user_id = callback.from_user.id
+
+#     user_state = await state.get_data()
+#     fullname = user_state.get("fullname")
+#     phone = user_state.get("phonenumber") or user_state.get("phone")
+
+#     if (not fullname) or (not phone):
+#         try:
+#             user = await get_user(user_id)
+#             if user:
+#                 if not fullname:
+#                     fullname = getattr(user, "fullname", None)
+#                 if not phone:
+#                     phone = getattr(user, "phone", None)
+#         except Exception as e:
+#             logger.exception("get_user xatoligi: %s", e)
+
+#     fullname = fullname or "Noma'lum"
+#     phone = phone or "Noma'lum"
+
+#     order = {
+#         "user_id": user_id,
+#         "fullname": fullname,
+#         "phonenumber": phone,
+#         "service_id": service_id,
+#         "barber_id": barber_id,
+#         "date": date_str,   # "YYYY-MM-DD" yoki datetime.date (save_order parse qiladi)
+#         "time": time_str    # "HH:MM" yoki datetime.time
+#     }
+
+#     try:
+#         saved = await save_order(order)
+#     except Exception as e:
+#         logger.exception("DB save error: %s", e)
+#         await callback.message.answer(
+#             "❌ Buyurtmangizni saqlashda xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko‘ring yoki administrator bilan bog‘laning."
+#         )
+#         await callback.answer()
+#         return
+
+#     try:
+#         service_name = services[service_id][0] if service_id in services else service_id
+#     except Exception:
+#         service_name = service_id
+
+#     try:
+#         barber_name = next((b["name"] for b in barbers if b.get("id") == barber_id), barber_id)
+#     except Exception:
+#         barber_name = barber_id
+
+#     await callback.message.edit_text(
+#         f"✅ Siz muvaffaqiyatli navbat oldingiz:\n"
+#         f"👤 Ism: {fullname}\n"
+#         f"📱 Telefon: {phone}\n"
+#         f"💈 Xizmat: {service_name}\n"
+#         f"👨‍💼 Usta: {barber_name}\n"
+#         f"🗓 Sana: {date_str}\n"
+#         f"🕔 Vaqt: {time_str}"
+#     )
+
+#     await state.clear()
+#     await callback.answer()
+#     await callback.message.answer(
+#         "Quyidagi menyudan birini tanlang:",
+#         reply_markup=get_main_menu()
+#     )

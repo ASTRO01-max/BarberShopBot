@@ -1,17 +1,5 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from database.users_utils import get_user   # foydalanuvchi tekshirish uchun
-
-# Asosiy menu tugmalari
-cancel_order_btn = KeyboardButton(text="❌Buyurtmani bekor qilish")
-order_history_btn = KeyboardButton(text="🗂Buyurtmalar tarixi")
-
-# keyboard = ReplyKeyboardMarkup(
-#     keyboard=[
-#         [cancel_order_btn],
-#         [order_history_btn],
-#     ],
-#     resize_keyboard=True
-# )
+from sql.db_users_utils import get_user
 
 phone_request_keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -21,23 +9,22 @@ phone_request_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=True
 )
 
-def get_dynamic_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
-    """
-    Foydalanuvchining mavjudligiga qarab tugmalarni qaytaradi:
-    - Agar foydalanuvchi yo‘q → '📥 Foydalanuvchini saqlash'
-    - Agar foydalanuvchi mavjud → '📥 Foydalanuvchi ma'lumotlarini o‘zgartirish'
-    """
-    user = get_user(user_id)
+cancel_order_btn = KeyboardButton(text="❌Buyurtmani bekor qilish")
+order_history_btn = KeyboardButton(text="🗂Buyurtmalar tarixi")
 
-    # Asosiy tugmalar
+async def get_dynamic_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
+    user = await get_user(user_id)
+
     buttons = [
         [cancel_order_btn],
         [order_history_btn],
     ]
 
-    # Dinamik tugma qo‘shamiz
     if user:
-        buttons.append([KeyboardButton(text="📥Foydalanuvchi ma'lumotlarini o'zgartirish")])
+        buttons.append([
+            KeyboardButton(text="📥Foydalanuvchi ma'lumotlarini o'zgartirish"),
+            KeyboardButton(text="❌ Foydalanuvchi ma'lumotlarini o‘chirish")
+        ])
     else:
         buttons.append([KeyboardButton(text="📥Foydalanuvchini saqlash")])
 

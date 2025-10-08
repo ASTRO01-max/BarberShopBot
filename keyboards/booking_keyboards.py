@@ -1,7 +1,7 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
-from database.order_utils import get_booked_times
+from sql.db_order_utils import get_booked_times
 
 from database.static_data import services, barbers
 
@@ -35,20 +35,35 @@ def date_keyboard(service_id, barber_id):
     builder.adjust(1)
     return builder.as_markup()
 
-def time_keyboard(service_id: str, barber_id: str, date: str):
-    builder = InlineKeyboardBuilder()
-    all_times = ["10:00", "11:00", "13:00", "15:00", "17:00"]
+async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKeyboardMarkup:
+    all_times = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
 
-    booked = get_booked_times(service_id, barber_id, date)
+    from sql.db_order_utils import get_booked_times
+    booked = await get_booked_times(barber_id, date)
+
     available = [t for t in all_times if t not in booked]
 
     if not available:
-        return None  # Hech qanday tugma yo‘q
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Bo'sh vaqtlar yo'q", callback_data="no_times")]
+        ])
 
-    for time in available:
-        builder.button(
-            text=time,
-            callback_data=f"confirm_{service_id}_{barber_id}_{date}_{time}"
+    # Aiogram 3.x uchun to‘g‘ri usul
+    markup = InlineKeyboardMarkup(inline_keyboard=[])
+
+    row = []
+    for i, t in enumerate(available, start=1):
+        row.append(
+            InlineKeyboardButton(
+                text=t,
+                callback_data=f"confirm_{service_id}_{barber_id}_{date}_{t}"
+            )
         )
-    builder.adjust(2)
-    return builder.as_markup()
+        if i % 2 == 0:  # har 2ta tugmadan keyin yangi qatordan
+            markup.inline_keyboard.append(row)
+            row = []
+
+    if row:
+        markup.inline_keyboard.append(row)
+
+    return markup

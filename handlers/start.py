@@ -1,14 +1,23 @@
-from aiogram import types, html
+from aiogram import types, html, Router
 from aiogram.types import Message
+from aiogram.filters import CommandStart
 from keyboards.main_menu import get_main_menu
-from keyboards.main_buttons import *
+from keyboards.main_buttons import get_dynamic_main_keyboard  
 
+router = Router()
+
+@router.message(CommandStart())
 async def start_handler(message: Message):
+    # Asosiy foydalanuvchi tugmalarini yuklash
+    keyboard = await get_dynamic_main_keyboard(message.from_user.id)
+
+    # Foydalanuvchiga xush kelibsiz xabari
     await message.answer(
-        f"Assalomu alaykum, botga xush kelibsiz, {html.bold(message.from_user.full_name)}!",
-        parse_mode="HTML",
-        reply_markup=get_dynamic_main_keyboard(message.from_user.id)  # Barcha tugmalar birlashtirilgan
+        "Assalomu alaykum, botga xush kelibsiz!\nQuyidagi menyudan birini tanlang:",
+        reply_markup=keyboard
     )
+
+    # Asosiy menyu (xizmatlar, ustalar, navbat olish va hokazo)
     await message.answer(
         "Quyidagi menyudan birini tanlang:",
         reply_markup=get_main_menu()

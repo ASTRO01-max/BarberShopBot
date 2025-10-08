@@ -3,7 +3,6 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
 from config import BOT_TOKEN
 from utils.logger import setup_logger
-from database.order_utils import save_order
 from admins import router as admins_router
 from sql.db import init_db
 
