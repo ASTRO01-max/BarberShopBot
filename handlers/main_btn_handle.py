@@ -36,6 +36,11 @@ async def cancel_last_order(message: Message):
 # 🗂 Buyurtmalar tarixi
 @router.message(F.text == "🗂Buyurtmalar tarixi")
 async def show_user_orders(message: Message):
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+             [InlineKeyboardButton(text="📂 Oldingi buyurtmalarni ko'rish", callback_data="show_all_orders")]
+        ]
+    )
     user_id = message.from_user.id
     orders = await load_orders()
     user_orders = [o for o in orders if o.user_id == user_id]
@@ -48,11 +53,11 @@ async def show_user_orders(message: Message):
     todays_orders = [o for o in user_orders if o.date == today]
 
     if not todays_orders:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="📂 Oldingi buyurtmalarni ko'rish", callback_data="show_all_orders")]
-            ]
-        )
+        # markup = InlineKeyboardMarkup(
+        #     inline_keyboard=[
+        #         [InlineKeyboardButton(text="📂 Oldingi buyurtmalarni ko'rish", callback_data="show_all_orders")]
+        #     ]
+        # )
         await message.answer("❌ Siz bugun buyurtma qilmadingiz.", reply_markup=markup)
         return
 
@@ -64,7 +69,7 @@ async def show_user_orders(message: Message):
             f"   ✂️ Xizmat: {o.service_id}\n"
         )
 
-    await message.answer("\n".join(response_lines), parse_mode="Markdown")
+    await message.answer("\n".join(response_lines), parse_mode="Markdown", reply_markup=markup)
 
 
 # 📂 Oldingi buyurtmalar
@@ -186,37 +191,56 @@ async def process_new_fullname(message: Message, state: FSMContext):
     await state.update_data(new_fullname=message.text.strip())
     await message.answer("📱 Endi yangi telefon raqamingizni kiriting (+998 bilan):")
     await state.set_state(UserState.waiting_for_new_phone)
+    await message.answer(
+        "Telefon raqamingizni button orqali yuborishingiz mumkin",
+        reply_markup=phone_request_keyboard
+    )
 
-
-@router.message(UserState.waiting_for_new_phone)
-async def process_new_phone(message: Message, state: FSMContext):
-    phone = message.text.strip()
-    if not validate_phone(phone):
-        await message.answer("❌ Telefon raqam noto‘g‘ri. Masalan: +998901234567")
+@router.message(UserState.waiting_for_new_phone, F.content_type.in_({"text", "contact"}))
+async def process_new_phone(message: types.Message, state: FSMContext):
+    """
+    Foydalanuvchi telefon raqamini yuboradi (matn yoki kontakt).
+    """
+    # 1️⃣ Telefonni aniqlash
+    phone = None
+    if message.contact and getattr(message.contact, "phone_number", None):
+        phone = message.contact.phone_number
+    elif message.text:
+        phone = message.text.strip()
+    else:
+        await message.answer(
+            "📱 Iltimos, telefon raqamingizni yuboring — matn sifatida (+998901234567) "
+            "yoki 'Kontakt yuborish' tugmasi orqali."
+        )
         return
 
-    user_data = await state.get_data()
-    new_fullname = user_data.get("new_fullname")
+    # 2️⃣ Validatsiya
+    if not phone.startswith("+998") or len(phone) != 13:
+        await message.answer("❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567).")
+        return
 
+    # 3️⃣ State’dan ismni olish
+    user_data = await state.get_data()
+    fullname = user_data.get("new_fullname")
+
+    # 4️⃣ DB yangilash
+    from sql.db_users_utils import update_user
     success = await update_user(
         user_id=message.from_user.id,
-        new_fullname=new_fullname,
+        new_fullname=fullname,
         new_phone=phone
     )
 
     if success:
         await message.answer(
-            f"✅ Ma'lumotlaringiz yangilandi!\n\n"
-            f"👤 Ism: {new_fullname}\n"
-            f"📱 Telefon: {phone}"
+            f"✅ Ma'lumotlaringiz yangilandi!\n\n👤 Ism: {fullname}\n📱 Telefon: {phone}"
         )
     else:
-        await message.answer("❌ Foydalanuvchi topilmadi yoki xatolik yuz berdi.")
+        await message.answer("❌ Ma'lumotni yangilashda xatolik yuz berdi.")
 
     await state.clear()
     keyboard = await get_dynamic_main_keyboard(message.from_user.id)
     await message.answer("Asosiy menyu:", reply_markup=keyboard)
-
 
 # ❌ Foydalanuvchi ma'lumotlarini o'chirish
 @router.message(F.text == "❌ Foydalanuvchi ma'lumotlarini o‘chirish")
