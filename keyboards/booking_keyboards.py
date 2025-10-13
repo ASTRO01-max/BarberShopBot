@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.future import select
 from sql.db import async_session
 from sql.models import Services, Barbers
+from utils.emoji_map import SERVICE_EMOJIS
 
 
 def back_button() -> InlineKeyboardMarkup:
@@ -29,9 +30,10 @@ async def service_keyboard() -> InlineKeyboardMarkup:
             builder.button(text="❌ Xizmatlar mavjud emas", callback_data="no_services")
         else:
             for s in services:
+                emoji = SERVICE_EMOJIS.get(s.name, "🔹")
                 builder.button(
-                    text=s.name,
-                    callback_data=f"service_{s.name}"  # ⚠️ id o‘rniga nom ishlatildi
+                    text=f"{emoji} {s.name}",   # ✅ emoji textda
+                    callback_data=f"service_{s.name}"  # ✅ callback_data faqat matn
                 )
 
         builder.adjust(1)

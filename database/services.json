@@ -1,0 +1,22 @@
+{
+    "haircut": [
+        "✂️ Soch olish",
+        50000,
+        "30 daqiqa"
+    ],
+    "beard": [
+        "🧔 Soqol olish",
+        30000,
+        "15 daqiqa"
+    ],
+    "combo": [
+        "💎 Komplekt",
+        70000,
+        "45 daqiqa"
+    ],
+    "bosh_yuvish": [
+        "Bosh yuvish",
+        35000,
+        "25 daqiqa"
+    ]
+}

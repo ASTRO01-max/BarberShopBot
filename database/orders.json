@@ -1,0 +1,126 @@
+[
+    {
+        "fullname": "G'aybullayev Muhammad Ysuuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shox",
+        "date": "2025-07-26",
+        "time": "10:00"
+    },
+    {
+        "fullname": "muhammad yusuf",
+        "phonenumber": "+998998071235",
+        "service_id": "haircut",
+        "barber_id": "shox",
+        "date": "2025-07-26",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "ASTRO PLAYER",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "ASTRO player",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "aziz",
+        "date": "2025-09-02",
+        "time": "15:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "g'aybullayev muhammadyusuf",
+        "phonenumber": "+998901234567",
+        "service_id": "beard",
+        "barber_id": "aziz",
+        "date": "2025-09-01",
+        "time": "10:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammad Yusuf",
+        "phonenumber": "+998901234567",
+        "service_id": "combo",
+        "barber_id": "abdulaziz",
+        "date": "2025-09-01",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammad Yusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "10:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "ASTRO PLAYER",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "15:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Poulatov Mamin",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "11:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Muhammad Yusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "13:00"
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "Abdullayev salohiddin",
+        "phonenumber": "+998998071134",
+        "service_id": "beard",
+        "barber_id": "shohruh",
+        "date": "2025-09-01",
+        "time": "17:00"
+    },
+    {
+        "user_id": 5917410411,
+        "date": "2025-09-24",
+        "time": "17:00",
+        "service_id": "haircut",
+        "service": null,
+        "barber_id": "aziz",
+        "barber": null
+    },
+    {
+        "user_id": 5917410411,
+        "date": "2025-09-23",
+        "time": "17:00",
+        "service_id": "beard",
+        "service": null,
+        "barber_id": "shohruh",
+        "barber": null
+    },
+    {
+        "user_id": 5917410411,
+        "fullname": "G'aybullayev Muhammadyusuf",
+        "phonenumber": "+998998071134",
+        "service_id": "haircut",
+        "barber_id": "shohruh",
+        "date": "2025-09-30",
+        "time": "11:00"
+    }
+]
