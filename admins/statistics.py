@@ -1,32 +1,43 @@
+#admins/statistics.py
 from aiogram import Router, types, F
-from config import ADMINS
-from datetime import datetime
-import json
+from datetime import date
+from sqlalchemy import select, func
+from sql.db import async_session
+from sql.models import Order
 
 router = Router()
 
 @router.message(F.text == "📊 Statistika")
 async def show_stats(message: types.Message):
-    if message.from_user.id not in ADMINS:
-        return
+    # 1️⃣ Ma'lumotlarni olish
+    async with async_session() as session:
+        # Jami buyurtmalar soni
+        total_orders = await session.scalar(select(func.count(Order.id)))
 
-    orders_file = "database/orders.json"
-    try:
-        with open(orders_file, "r", encoding="utf-8") as file:
-            orders = json.load(file)
-    except:
-        orders = []
+        # Jami foydalanuvchilar soni (unikal user_id lar)
+        total_users = await session.scalar(
+            select(func.count(func.distinct(Order.user_id)))
+        )
 
-    total_orders = len(orders)
-    users = set(order.get("user_id") for order in orders)
+        # Bugungi sana
+        today = date.today()
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_orders = [o for o in orders if o.get("date") == today]
-    today_users = set(o.get("user_id") for o in today_orders)
+        # Bugungi buyurtmalar soni
+        today_orders = await session.scalar(
+            select(func.count(Order.id)).where(Order.date == today)
+        )
 
+        # Bugungi foydalanuvchilar soni (unikal)
+        today_users = await session.scalar(
+            select(func.count(func.distinct(Order.user_id))).where(Order.date == today)
+        )
+
+    # 2️⃣ Natijani chiroyli shaklda chiqarish
     await message.answer(
-        f"📦 Jami buyurtmalar soni: {total_orders}\n"
-        f"👥 Foydalanuvchilar soni: {len(users)}\n"
-        f"📅 Bugungi buyurtmalar soni: {len(today_orders)}\n"
-        f"🙋‍♂️ Bugungi foydalanuvchilar soni: {len(today_users)}"
+        f"📊 <b>Statistika</b>\n\n"
+        f"📦 <b>Jami buyurtmalar:</b> {total_orders}\n"
+        f"👥 <b>Foydalanuvchilar soni:</b> {total_users}\n"
+        f"📅 <b>Bugungi buyurtmalar:</b> {today_orders}\n"
+        f"🙋‍♂️ <b>Bugungi foydalanuvchilar:</b> {today_users}",
+        parse_mode="HTML"
     )

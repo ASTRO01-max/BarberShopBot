@@ -92,16 +92,23 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
 
 # --- 5-qadam: Usta tanlash ---
+# --- 5-qadam: Usta tanlash ---
 async def book_step2(callback: CallbackQuery, state: FSMContext):
-    _, service_id, barber_id = callback.data.split("_")
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        await callback.answer("⚠️ Ma’lumot formati noto‘g‘ri. Iltimos, qayta tanlang.", show_alert=True)
+        return
+
+    _, service_id, barber_id = parts[:3]
     await state.update_data(service_id=service_id, barber_id=barber_id)
 
     await callback.message.edit_text(
         "📅 Sana tanlang:",
-        reply_markup= booking_keyboards.date_keyboard(service_id, barber_id)
+        reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
     )
     await state.set_state(UserState.waiting_for_date)
     await callback.answer()
+
 
 
 # --- 6-qadam: Sana tanlash ---

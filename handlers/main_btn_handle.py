@@ -162,63 +162,29 @@ async def back_to_today(callback: CallbackQuery):
 @router.message(F.text == "❌Buyurtmani bekor qilish")
 async def cancel_last_order(message: Message):
     user_id = message.from_user.id
-    deleted_order = await delete_last_order_by_user(user_id)
+    today = datetime.now().date()
+
+    # 🔹 Faqat bugungi sana uchun so‘nggi buyurtmani o‘chiradi
+    deleted_order = await delete_last_order_by_user(user_id, today)
 
     if deleted_order:
         await message.answer(
-            f"✅ Eng so‘nggi buyurtmangiz bekor qilindi:\n"
+            f"✅ Bugungi buyurtmangiz bekor qilindi:\n"
             f"📅 Sana: {deleted_order.date}\n"
             f"⏰ Vaqt: {deleted_order.time}\n"
             f"💇‍♂️ Barber ID: {deleted_order.barber_id}\n"
             f"🛎 Xizmat ID: {deleted_order.service_id}"
         )
-        await message.answer(
-        "Quyidagi menyudan birini tanlang:",
-        parse_mode="HTML",
-        reply_markup=get_main_menu()
-        )  
     else:
-        keyboard = await get_dynamic_main_keyboard(message.from_user.id)
-        await message.answer("❗ Sizda bekor qilinadigan buyurtma topilmadi.", reply_markup=keyboard)
-        await message.answer(
+        keyboard = await get_dynamic_main_keyboard(user_id)
+        await message.answer("❗ Sizda bugungi kunga oid bekor qilinadigan buyurtma topilmadi.", reply_markup=keyboard)
+
+    # 🔹 Har holda asosiy menyu chiqariladi
+    await message.answer(
         "Quyidagi menyudan birini tanlang:",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
-
-# @router.callback_query(F.data == "show_today_orders")
-# async def show_today_orders(callback: CallbackQuery):
-#     """
-#     📅 Bugungi buyurtmalarga qaytish
-#     """
-#     user_id = callback.from_user.id
-#     orders = await load_orders()
-#     user_orders = [o for o in orders if o.user_id == user_id]
-
-#     today = datetime.now().date()
-#     todays_orders = [o for o in user_orders if o.date == today]
-
-#     if not todays_orders:
-#         await callback.message.edit_text("❌ Siz bugun buyurtma qilmadingiz.")
-#         await callback.answer()
-#         return
-
-#     response_lines = ["🗂 *Bugungi buyurtmalaringiz:*\n"]
-#     for idx, o in enumerate(todays_orders, start=1):
-#         response_lines.append(
-#             f"{idx}. 📅 {o.date}, ⏰ {o.time}\n"
-#             f"   💈 Barber: {o.barber_id}\n"
-#             f"   ✂️ Xizmat: {o.service_id}\n"
-#         )
-
-#     back_markup = InlineKeyboardMarkup(
-#         inline_keyboard=[
-#             [InlineKeyboardButton(text="📂 Oldingi buyurtmalarni ko‘rish", callback_data="show_all_orders")]
-#         ]
-#     )
-
-#     await callback.message.edit_text("\n".join(response_lines), parse_mode="Markdown", reply_markup=back_markup)
-#     await callback.answer()
 
 
 @router.message(F.text == "📥Foydalanuvchini saqlash")
@@ -289,6 +255,11 @@ async def process_phone(message: types.Message, state: FSMContext):
         f"✅ Ma’lumotlar saqlandi!\n\n👤 Ism: {saved.fullname or fullname}\n📞 Tel: {saved.phone}",
         reply_markup=keyboard
     )
+    await message.answer(
+        "Quyidagi menyudan birini tanlang:",
+        parse_mode="HTML",
+        reply_markup=get_main_menu()
+    )
 
 @router.message(F.text == "📥Foydalanuvchi ma'lumotlarini o'zgartirish")
 async def ask_new_fullname(message: Message, state: FSMContext):
@@ -305,11 +276,11 @@ async def process_new_fullname(message: Message, state: FSMContext):
         "Telefon raqamingizni button orqali yuborishingiz mumkin",
         reply_markup=phone_request_keyboard
     )
-    await message.answer(
-        "Quyidagi menyudan birini tanlang:",
-        parse_mode="HTML",
-        reply_markup=get_main_menu()
-    )
+    # await message.answer(
+    #     "Quyidagi menyudan birini tanlang:",
+    #     parse_mode="HTML",
+    #     reply_markup=get_main_menu()
+    # )
 
 @router.message(UserState.waiting_for_new_phone, F.content_type.in_({"text", "contact"}))
 async def process_new_phone(message: types.Message, state: FSMContext):
@@ -350,7 +321,6 @@ async def process_new_phone(message: types.Message, state: FSMContext):
         await message.answer("❌ Ma'lumotni yangilashda xatolik yuz berdi.")
 
     await state.clear()
-    await message.answer("✅ foydalanuvchi yangilandi", show_alert=False)
     await message.answer(
         "Quyidagi menyudan birini tanlang:",
         parse_mode="HTML",
@@ -361,11 +331,12 @@ async def process_new_phone(message: types.Message, state: FSMContext):
 async def delete_user_data(message: types.Message):
     user_id = message.from_user.id
     deleted = await delete_user(user_id)
+    keyboard = await get_dynamic_main_keyboard(user_id)
 
     if deleted:
-        await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o‘chirildi!")
+        await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o‘chirildi!", reply_markup=keyboard)
     else:
         await message.answer("⚠️ Foydalanuvchi topilmadi yoki o‘chirishda xatolik yuz berdi.")
 
-    keyboard = await get_dynamic_main_keyboard(user_id)
-    await message.answer("Asosiy menyu:", reply_markup=keyboard)
+    await message.answer("Quyidagi menyudan birini tanlang:", reply_markup=get_main_menu())
+

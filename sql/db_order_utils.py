@@ -117,15 +117,22 @@ async def get_booked_times(barber_id: str, date_str: str):
         return [t.strftime("%H:%M") for t in times]
 
 
-async def delete_last_order_by_user(user_id: int):
+async def delete_last_order_by_user(user_id: int, order_date: date = None):
+    """
+    Foydalanuvchining eng so‘nggi (yoki bugungi) buyurtmasini o‘chiradi.
+    """
     async with async_session() as session:
-        uid = int(user_id)
-        result = await session.execute(
-            select(Order).where(Order.user_id == uid).order_by(Order.id.desc())
-        )
-        last_order = result.scalars().first()
-        if not last_order:
+        query = select(Order).where(Order.user_id == user_id)
+        if order_date:
+            query = query.where(Order.date == order_date)
+
+        query = query.order_by(Order.id.desc())
+        result = await session.execute(query)
+        order = result.scalars().first()
+
+        if not order:
             return None
-        await session.delete(last_order)
+
+        await session.delete(order)
         await session.commit()
-        return last_order
+        return order

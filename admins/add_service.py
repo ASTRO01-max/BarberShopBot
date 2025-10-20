@@ -11,10 +11,7 @@ router = Router()
 
 # --- 1️⃣ Admin xizmat qo‘shishni boshlaydi ---
 @router.message(F.text == "💈 Servis qo'shish")
-async def add_service_prompt(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMINS:
-        return await message.answer("⛔ Sizda bu amalni bajarish uchun huquq yo‘q.")
-    
+async def add_service_prompt(message: types.Message, state: FSMContext):    
     await state.set_state(AdminStates.adding_service)
     await message.answer("📝 Yangi xizmat nomini kiriting:")
 

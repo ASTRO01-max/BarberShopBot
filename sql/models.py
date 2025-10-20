@@ -39,7 +39,6 @@ class Barbers(Base):
     __tablename__ = "barbers"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    tg_id = Column(BigInteger, unique=True, nullable=True, index=True)
     barber_fullname = Column(String(255), nullable=False)
     phone = Column(String(50), nullable=True)
     experience = Column(String(50), nullable=False)
