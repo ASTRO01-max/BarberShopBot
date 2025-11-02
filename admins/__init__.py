@@ -1,3 +1,4 @@
+# admins/__init__.py
 from aiogram import Router
 
 from .admin import router as admin_router

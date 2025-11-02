@@ -2,6 +2,20 @@
 from sqlalchemy import Column, Integer, BigInteger, String, Date, Time
 from sql.db import Base
 
+
+#Vaqtinchalik foydalanuvchi
+class OrdinaryUser(Base):
+    __tablename__ = "ordinary_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tg_id = Column(BigInteger, unique=True, nullable=False, index=True)
+    first_name = Column(String(100), nullable=True)
+    last_name = Column(String(100), nullable=True)
+    username = Column(String(100), nullable=True)
+
+    def __repr__(self):
+        return f"<OrdinaryUser tg_id={self.tg_id}, username={self.username}>"
+
 #USERS foydalanuvchilar
 class User(Base):
     __tablename__ = "users"
@@ -10,7 +24,6 @@ class User(Base):
     tg_id = Column(BigInteger, unique=True, nullable=False, index=True)
     fullname = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
-
 
 #Buyurtmalar
 class Order(Base):
@@ -24,6 +37,8 @@ class Order(Base):
     barber_id = Column(String(50), nullable=False)
     date = Column(Date, nullable=False)
     time = Column(Time, nullable=False)
+    booked_date = Column(Date, nullable=False)
+    booked_time = Column(Time, nullable=False)
 
 
 class Admins(Base):

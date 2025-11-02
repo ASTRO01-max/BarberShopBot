@@ -71,7 +71,6 @@ async def add_barber_work_days(message: types.Message, state: FSMContext):
     # ✅ Bazaga yozish
     async with async_session() as session:
         new_barber = Barbers(
-            tg_id=None,  # admin tomonidan kiritilayotgani uchun hozircha None
             barber_fullname=data["fullname"],
             phone=data["phone"],
             experience=data["experience"],

@@ -1,8 +1,9 @@
-# database/db.py
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "postgresql+asyncpg://postgres:1234@localhost:5432/barbershop"
+# Yangi UTF-8 baza bilan ulanish
+DATABASE_URL = "postgresql+asyncpg://postgres:1234@127.0.0.1:5432/barbershop_utf8"
+
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 async_session = sessionmaker(
@@ -14,7 +15,6 @@ async_session = sessionmaker(
 Base = declarative_base()
 
 async def init_db():
-    # Import model faqat shu funksiya ichida bo‘lsin
     from . import models
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -22,10 +22,12 @@ from handlers import (
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-dp.message.register(
-    start.start_handler,
-    CommandStart()
-)
+# dp.message.register(
+#     start.start_handler,
+#     CommandStart()
+# )
+
+dp.include_router(start.router)
 
 #ADMIN_PANEL
 dp.include_router(admins_router)
