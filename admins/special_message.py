@@ -50,8 +50,13 @@ async def send_broadcast(message: types.Message, state: FSMContext):
             failed += 1
             continue
 
+    # await message.answer(
+    #     f"Jo'natilgan xabar: {text}"
+    # )
+
     await message.answer(
         f"✅ Xabar yuborildi.\n\n"
+        f"Jo'natilgan xabar: {text}"
         f"📤 Jo‘natilgan: <b>{sent}</b>\n"
         f"⚠️ Yuborilmagan: <b>{failed}</b>",
         parse_mode="HTML"
