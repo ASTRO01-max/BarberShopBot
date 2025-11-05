@@ -70,6 +70,7 @@ async def save_order(order: dict):
             time_val = _parse_time(order.get("time"))
 
             # ---- Yaratish ----
+            now = datetime.now()
             new_order = Order(
                 user_id=user_id,
                 fullname=fullname,
@@ -78,6 +79,8 @@ async def save_order(order: dict):
                 barber_id=barber_id,
                 date=date_val,
                 time=time_val,
+                booked_date=now.date(),
+                booked_time=now.time(),
             )
             session.add(new_order)
             await session.commit()

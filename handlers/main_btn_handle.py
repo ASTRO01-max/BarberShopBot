@@ -1,9 +1,12 @@
 import re
 from aiogram import F, types, Router
+from datetime import date
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from datetime import datetime
-
+from sqlalchemy import select, and_
+from sql.db import async_session
+from sql.models import Order, Services
 from utils.states import UserState, UserForm
 from sql.db_order_utils import delete_last_order_by_user, load_orders
 from sql.db_users_utils import save_user, update_user, delete_user, get_user
@@ -160,32 +163,82 @@ async def back_to_today(callback: CallbackQuery):
 
 
 @router.message(F.text == "❌Buyurtmani bekor qilish")
-async def cancel_last_order(message: Message):
+async def show_todays_orders_for_cancel(message: types.Message):
     user_id = message.from_user.id
-    today = datetime.now().date()
+    today = date.today()
 
-    # 🔹 Faqat bugungi sana uchun so‘nggi buyurtmani o‘chiradi
-    deleted_order = await delete_last_order_by_user(user_id, today)
-
-    if deleted_order:
-        await message.answer(
-            f"✅ Bugungi buyurtmangiz bekor qilindi:\n"
-            f"📅 Sana: {deleted_order.date}\n"
-            f"⏰ Vaqt: {deleted_order.time}\n"
-            f"💇‍♂️ Barber ID: {deleted_order.barber_id}\n"
-            f"🛎 Xizmat ID: {deleted_order.service_id}"
+    async with async_session() as session:
+        result = await session.execute(
+            select(Order).where(and_(Order.user_id == user_id, Order.date == today))
         )
-    else:
-        keyboard = await get_dynamic_main_keyboard(user_id)
-        await message.answer("❗ Sizda bugungi kunga oid bekor qilinadigan buyurtma topilmadi.", reply_markup=keyboard)
+        orders = result.scalars().all()
 
-    # 🔹 Har holda asosiy menyu chiqariladi
-    await message.answer(
+    # Agar buyurtma topilmasa
+    if not orders:
+        keyboard = await get_dynamic_main_keyboard(user_id)
+        await message.answer(
+            "❗ Sizda bugungi kunga oid bekor qilinadigan buyurtma topilmadi.",
+            reply_markup=keyboard
+        )
+        await message.answer(
+            "Quyidagi menyudan birini tanlang:",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+        return
+
+    # Har bir buyurtmani alohida xabar bilan chiqarish
+    async with async_session() as session:
+        for order in orders:
+            service = await session.get(Services, order.service_id)
+            service_name = service.service_name if service else "Noma'lum xizmat"
+
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{order.id}")]
+                ]
+            )
+
+            await message.answer(
+                f"📅 Sana: {order.date}\n"
+                f"⏰ Vaqt: {order.time}\n"
+                f"✂️ Xizmat: {service_name}",
+                reply_markup=markup
+            )
+
+
+# 🟢 Tugma bosilganda — buyurtmani bekor qilish
+@router.callback_query(F.data.startswith("cancel_order:"))
+async def cancel_order_callback(callback: CallbackQuery):
+    try:
+        order_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        return await callback.answer("❌ Xatolik: noto‘g‘ri ID.", show_alert=True)
+
+    async with async_session() as session:
+        order = await session.get(Order, order_id)
+        if not order:
+            await callback.answer("❗ Bu buyurtma allaqachon bekor qilingan.", show_alert=True)
+            return
+
+        # Buyurtmani o‘chirish
+        await session.delete(order)
+        await session.commit()
+
+    await callback.message.edit_text(
+        f"✅ Buyurtma bekor qilindi!\n\n"
+        f"📅 Sana: {order.date}\n"
+        f"⏰ Vaqt: {order.time}"
+    )
+    await callback.answer("Buyurtma muvaffaqiyatli o‘chirildi ✅")
+
+    # 🔹 Asosiy menyuga qaytarish
+    keyboard = await get_dynamic_main_keyboard(callback.from_user.id)
+    await callback.message.answer(
         "Quyidagi menyudan birini tanlang:",
         parse_mode="HTML",
-        reply_markup=get_main_menu()
+        reply_markup=keyboard
     )
-
 
 @router.message(F.text == "📥Foydalanuvchini saqlash")
 async def ask_fullname(message: types.Message, state: FSMContext):
