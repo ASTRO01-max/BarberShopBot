@@ -12,45 +12,58 @@ ORDERS_PER_PAGE = 5
 
 # 📄 Sahifani shakllantirish funksiyasi
 async def get_orders_page(page: int):
-    offset = page * ORDERS_PER_PAGE
+    offset = max(0, page) * ORDERS_PER_PAGE
 
-    async with async_session() as session:
-        # Har safar faqat kerakli 5 ta yozuvni olamiz
-        result = await session.execute(
-            select(Order)
-            .order_by(Order.date.desc(), Order.time.desc())
-            .offset(offset)
-            .limit(ORDERS_PER_PAGE)
-        )
-        orders = result.scalars().all()
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Order)
+                .order_by(Order.date.desc(), Order.time.desc())
+                .offset(offset)
+                .limit(ORDERS_PER_PAGE)
+            )
+            orders = result.scalars().all()
 
-        # Umumiy buyurtmalar sonini olish
-        total_orders = await session.scalar(select(func.count(Order.id)))
+            total_orders = await session.scalar(select(func.count(Order.id)))
+            total_orders = int(total_orders or 0)
+    except Exception as e:
+        # Log yoki print — developmentda ko'rish uchun
+        print("get_orders_page DB error:", repr(e))
+        return "❗ Buyurtmalarni olishda xatolik yuz berdi.", None, 0
 
     if not orders:
         return "📂 Buyurtmalar topilmadi.", None, total_orders
 
     response = f"📋 <b>Buyurtmalar ro'yxati (sahifa {page + 1})</b>\n\n"
     for idx, order in enumerate(orders, start=offset + 1):
+        # xavfsiz atribut olish (None bo'lsa bo'sh)
+        fullname = getattr(order, "fullname", "") or ""
+        phonenumber = getattr(order, "phonenumber", "") or ""
+        barber_id = getattr(order, "barber_id", "") or ""
+        service_id = getattr(order, "service_id", "") or ""
+        order_date = getattr(order, "date", "") or ""
+        order_time = getattr(order, "time", "") or ""
+
         response += (
             f"📌 <b>Buyurtma {idx}</b>\n"
-            f"👤 <b>Mijoz:</b> {order.fullname}\n"
-            f"📞 <b>Tel:</b> {order.phonenumber}\n"
-            f"💈 <b>Barber ID:</b> {order.barber_id}\n"
-            f"✂️ <b>Xizmat ID:</b> {order.service_id}\n"
-            f"🗓 <b>Sana:</b> {order.date}\n"
-            f"⏰ <b>Vaqt:</b> {order.time}\n\n"
+            f"👤 <b>Mijoz:</b> {fullname}\n"
+            f"📞 <b>Tel:</b> {phonenumber}\n"
+            f"💈 <b>Barber ID:</b> {barber_id}\n"
+            f"✂️ <b>Xizmat ID:</b> {service_id}\n"
+            f"🗓 <b>Sana:</b> {order_date}\n"
+            f"⏰ <b>Vaqt:</b> {order_time}\n\n"
         )
 
-    # Tugmalarni tayyorlash
-    buttons = []
+    # Tugmalarni tayyorlash — har birini alohida qatorda qo'yamiz
+    rows = []
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"prev_page:{page-1}"))
+        rows.append([InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"prev_page:{page-1}")])
     if offset + ORDERS_PER_PAGE < total_orders:
-        buttons.append(InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"next_page:{page+1}"))
+        rows.append([InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"next_page:{page+1}")])
 
-    markup = InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+    markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
     return response, markup, total_orders
+
 
 
 # 🗂 Buyurtmalar ro'yxatini chiqarish
