@@ -50,7 +50,7 @@ def get_user_orders_page(user_orders, page: int):
     return text, inline_kb
 
 
-# 🟢 1️⃣ Asosiy "🗂Buyurtmalar tarixi" bosilganda — bugungi buyurtmalarni ko‘rsatadi
+# 🟢 1️⃣ Asosiy "🗂Buyurtmalar tarixi" bosilganda — bugun joylashtirilgan buyurtmalarni ko‘rsatadi
 @router.message(F.text == "🗂Buyurtmalar tarixi")
 async def show_user_orders(message: Message):
     user_id = message.from_user.id
@@ -62,9 +62,10 @@ async def show_user_orders(message: Message):
         return
 
     today = datetime.now().date()
-    todays_orders = [o for o in user_orders if o.date == today]
+    # 🔹 Faqat bugun joylashtirilgan buyurtmalarni olish (booked_date bo‘yicha)
+    todays_orders = [o for o in user_orders if getattr(o, "booked_date", None) == today]
 
-    # 🔸 Agar bugungi buyurtma bo'lmasa
+    # 🔸 Agar bugun buyurtma qilinmagan bo‘lsa
     if not todays_orders:
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -74,8 +75,8 @@ async def show_user_orders(message: Message):
         await message.answer("❌ Siz bugun buyurtma qilmadingiz.", reply_markup=markup)
         return
 
-    # 🔸 Agar bugungi buyurtmalar bo‘lsa
-    response_lines = ["🗂 *Bugungi buyurtmalaringiz:*\n"]
+    # 🔸 Agar bugun joylashtirilgan buyurtmalar mavjud bo‘lsa
+    response_lines = ["🗂 *Bugun joylashtirilgan buyurtmalaringiz:*\n"]
     for idx, o in enumerate(todays_orders, start=1):
         response_lines.append(
             f"{idx}. 📅 {o.date}, ⏰ {o.time}\n"
@@ -127,6 +128,7 @@ async def paginate_user_orders(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# 🟢 4️⃣ "Bugungi buyurtmalarga qaytish" tugmasi uchun
 @router.callback_query(F.data == "back_to_today")
 async def back_to_today(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -134,23 +136,20 @@ async def back_to_today(callback: CallbackQuery):
     user_orders = [o for o in orders if o.user_id == user_id]
 
     today = datetime.now().date()
-    todays_orders = [o for o in user_orders if o.date == today]
+    todays_orders = [o for o in user_orders if getattr(o, "booked_date", None) == today]
 
-    # Har ikkala holat uchun markupni oldindan yaratamiz
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📁 Barcha buyurtmalarni ko‘rish", callback_data="show_all_orders")]
         ]
     )
 
-    # ❌ Bugungi buyurtma topilmagan holatda
     if not todays_orders:
-        await callback.message.edit_text("❌ Bugungi buyurtma topilmadi.", reply_markup=markup)
+        await callback.message.edit_text("❌ Bugun joylashtirilgan buyurtma topilmadi.", reply_markup=markup)
         await callback.answer()
         return
 
-    # ✅ Agar bugungi buyurtmalar mavjud bo‘lsa
-    response_lines = ["🗂 *Bugungi buyurtmalaringiz:*\n"]
+    response_lines = ["🗂 *Bugun joylashtirilgan buyurtmalaringiz:*\n"]
     for idx, o in enumerate(todays_orders, start=1):
         response_lines.append(
             f"{idx}. 📅 {o.date}, ⏰ {o.time}\n"
@@ -167,17 +166,20 @@ async def show_todays_orders_for_cancel(message: types.Message):
     user_id = message.from_user.id
     today = date.today()
 
+    # 🔹 Foydalanuvchining bugun joylagan barcha buyurtmalarini olish (navbat sanasidan qat’i nazar)
     async with async_session() as session:
         result = await session.execute(
-            select(Order).where(and_(Order.user_id == user_id, Order.date == today))
+            select(Order).where(
+                and_(Order.user_id == user_id, Order.booked_date == today)
+            )
         )
         orders = result.scalars().all()
 
-    # Agar buyurtma topilmasa
+    # 🔹 Agar bugungi buyurtma topilmasa
     if not orders:
         keyboard = await get_dynamic_main_keyboard(user_id)
         await message.answer(
-            "❗ Sizda bugungi kunga oid bekor qilinadigan buyurtma topilmadi.",
+            "❗ Sizda bugun joylagan bekor qilinadigan buyurtma topilmadi.",
             reply_markup=keyboard
         )
         await message.answer(
@@ -187,16 +189,23 @@ async def show_todays_orders_for_cancel(message: types.Message):
         )
         return
 
-    # Har bir buyurtmani alohida xabar bilan chiqarish
+    # 🔹 Bugun joylagan barcha buyurtmalarni chiqarish
     async with async_session() as session:
         for order in orders:
-            service = await session.get(Services, order.service_id)
-            service_name = service.service_name if service else "Noma'lum xizmat"
+            # Xizmat nomini xavfsiz olish
+            service_name = str(order.service_id)
+            if isinstance(order.service_id, int):
+                service = await session.get(Services, order.service_id)
+                if service:
+                    service_name = service.service_name
 
             markup = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{order.id}")]
-                ]
+                inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="❌ Bekor qilish",
+                        callback_data=f"cancel_order:{order.id}"
+                    )
+                ]]
             )
 
             await message.answer(
@@ -221,7 +230,6 @@ async def cancel_order_callback(callback: CallbackQuery):
             await callback.answer("❗ Bu buyurtma allaqachon bekor qilingan.", show_alert=True)
             return
 
-        # Buyurtmani o‘chirish
         await session.delete(order)
         await session.commit()
 
@@ -232,13 +240,14 @@ async def cancel_order_callback(callback: CallbackQuery):
     )
     await callback.answer("Buyurtma muvaffaqiyatli o‘chirildi ✅")
 
-    # 🔹 Asosiy menyuga qaytarish
     keyboard = await get_dynamic_main_keyboard(callback.from_user.id)
     await callback.message.answer(
         "Quyidagi menyudan birini tanlang:",
         parse_mode="HTML",
-        reply_markup=keyboard
+        reply_markup=get_main_menu()
     )
+
+
 
 @router.message(F.text == "📥Foydalanuvchini saqlash")
 async def ask_fullname(message: types.Message, state: FSMContext):
