@@ -1,82 +1,100 @@
-# admins/statistics.py
-from aiogram import Router, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import logging
 from datetime import date
+from typing import Union
+
+from aiogram import Router, types, F
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from sqlalchemy import select, func, and_
 from sqlalchemy.exc import SQLAlchemyError
+
 from sql.db import async_session
 from sql.models import Order, Barbers
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
-# --- Stiker yuborilganda javob ---
 @router.message(F.sticker)
 async def ignore_stickers(message: types.Message):
-    """Stiker yuborilganda javob qaytaradi"""
     await message.answer("⚠️ Iltimos, stiker emas, faqat matn yuboring.")
 
 
-# --- 📊 Umumiy statistika menyusi ---
-@router.message(F.text == "📊 Statistika")
-async def show_stats(message: types.Message):
-    """Admin uchun umumiy statistika va barcha barberlarni ko‘rsatish"""
+async def send_overall_stats(target: Union[types.Message, types.Chat, types.CallbackQuery]):
+    """Send overall statistics. `target` should support `.answer(...)` (Message or CallbackQuery)."""
     today = date.today()
 
     try:
         async with async_session() as session:
-            # --- Asosiy umumiy statistikalar ---
             total_orders = await session.scalar(select(func.count(Order.id)))
             total_users = await session.scalar(select(func.count(func.distinct(Order.user_id))))
-            today_orders = await session.scalar(
-                select(func.count(Order.id)).where(Order.booked_date == today)
-            )
+            today_orders = await session.scalar(select(func.count(Order.id)).where(Order.booked_date == today))
             today_users = await session.scalar(
                 select(func.count(func.distinct(Order.user_id))).where(Order.booked_date == today)
             )
-
-            # --- Barberlar ro‘yxati ---
             barbers = (await session.execute(select(Barbers))).scalars().all()
 
-        # --- Tugmalarni tayyorlash ---
-        buttons = []
-        if barbers:
-            for barber in barbers:
-                buttons.append([
-                    InlineKeyboardButton(
-                        text=f"💈 {barber.barber_fullname}",
-                        callback_data=f"barber_stats:{barber.id}"
-                    )
-                ])
-        else:
-            buttons = [[InlineKeyboardButton(text="❌ Barberlar mavjud emas", callback_data="none")]]
-
-        markup = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-        await message.answer(
-            f"📊 <b>Umumiy Statistika</b>\n\n"
-            f"📦 <b>Jami buyurtmalar:</b> {total_orders or 0}\n"
-            f"👥 <b>Foydalanuvchilar soni:</b> {total_users or 0}\n"
-            f"📅 <b>Bugungi buyurtmalar:</b> {today_orders or 0}\n"
-            f"🙋‍♂️ <b>Bugungi foydalanuvchilar:</b> {today_users or 0}\n\n"
-            f"💈 <b>Barberlar bo‘yicha statistika:</b>",
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
-
     except SQLAlchemyError as e:
-        await message.answer("❌ Ma'lumotlarni olishda xatolik yuz berdi.")
-        print(f"[STATISTICS ERROR] {e}")
+        logger.exception("DB error when fetching overall stats: %s", e)
+        # try to answer via target; if not possible, just return
+        try:
+            if hasattr(target, "answer"):
+                await target.answer("❌ Ma'lumotlarni olishda xatolik yuz berdi.")
+        except Exception as send_err:
+            logger.exception("Failed to notify about DB error: %s", send_err)
+        return
 
+    # normalize None -> 0
+    total_orders = int(total_orders or 0)
+    total_users = int(total_users or 0)
+    today_orders = int(today_orders or 0)
+    today_users = int(today_users or 0)
 
-# --- 💈 Alohida barber statistikasi ---
-@router.callback_query(F.data.startswith("barber_stats:"))
-async def barber_stats(callback: types.CallbackQuery):
-    """Alohida barber statistikasi"""
+    # build inline keyboard
+    if barbers:
+        buttons = [
+            [InlineKeyboardButton(text=f"💈 {b.barber_fullname}", callback_data=f"barber:{int(b.id)}")]
+            for b in barbers
+        ]
+    else:
+        buttons = [[InlineKeyboardButton(text="❌ Barberlar mavjud emas", callback_data="none")]]
+
+    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    text = (
+        f"📊 <b>Umumiy Statistika</b>\n\n"
+        f"📦 <b>Jami buyurtmalar:</b> {total_orders}\n"
+        f"👥 <b>Foydalanuvchilar soni:</b> {total_users}\n"
+        f"📅 <b>Bugungi buyurtmalar:</b> {today_orders}\n"
+        f"🙋‍♂️ <b>Bugungi foydalanuchilar:</b> {today_users}\n\n"
+        f"💈 <b>Barberlar bo‘yicha statistika:</b>"
+    )
+
+    # prefer target.answer(); callback.query has .message but also supports .answer if it's a CallbackQuery
     try:
-        _, barber_id_str = callback.data.split(":")
-        barber_id = int(barber_id_str)
-    except Exception:
+        if isinstance(target, CallbackQuery):
+            # send as a new message into the chat where callback came from
+            await target.message.answer(text, reply_markup=markup, parse_mode="HTML")
+            await target.answer()  # remove loading state
+        elif hasattr(target, "answer"):
+            await target.answer(text, reply_markup=markup, parse_mode="HTML")
+        else:
+            logger.warning("send_overall_stats: target has no .answer attribute: %r", type(target))
+    except Exception as e:
+        logger.exception("Failed to send overall stats message: %s", e)
+
+
+@router.message(F.text == "📊 Statistika")
+async def show_stats(message: types.Message):
+    await send_overall_stats(message)
+
+
+@router.callback_query(F.data.startswith("barber:"))
+async def barber_stats(callback: types.CallbackQuery):
+    try:
+        _, barber_id_raw = callback.data.split(":", 1)
+        barber_id = int(barber_id_raw)
+    except Exception as e:
+        logger.warning("Invalid callback.data for barber_stats: %r (%s)", callback.data, e)
         return await callback.answer("❌ Noto‘g‘ri barber ID!", show_alert=True)
 
     today = date.today()
@@ -87,50 +105,55 @@ async def barber_stats(callback: types.CallbackQuery):
             if not barber:
                 return await callback.answer("❌ Barber topilmadi!", show_alert=True)
 
-            # --- Statistika hisoblash ---
+            # 🔥 Muammo shu joyda edi — endi fullname bo‘yicha solishtiramiz:
             total_orders = await session.scalar(
-                select(func.count(Order.id)).where(Order.barber_id == barber_id)
+                select(func.count(Order.id)).where(Order.barber_id == barber.barber_fullname)
             )
             today_orders = await session.scalar(
                 select(func.count(Order.id)).where(
-                    and_(Order.barber_id == barber_id, Order.booked_date == today)
+                    and_(Order.barber_id == barber.barber_fullname, func.date(Order.booked_date) == today)
                 )
             )
-
-        # --- Orqaga tugmasi ---
-        back_button = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_stats")]]
-        )
-
-        # --- Natijani chiqarish ---
-        await callback.message.edit_text(
-            f"💈 <b>{barber.barber_fullname}</b> statistikasi:\n\n"
-            f"📦 <b>Jami buyurtmalar:</b> {total_orders or 0}\n"
-            f"📅 <b>Bugungi buyurtmalar:</b> {today_orders or 0}",
-            reply_markup=back_button,
-            parse_mode="HTML"
-        )
-        await callback.answer()
-
     except SQLAlchemyError as e:
-        await callback.answer("❌ Ma'lumotni olishda xatolik yuz berdi.", show_alert=True)
-        print(f"[BARBER_STATS ERROR] {e}")
+        logger.exception("DB error when fetching barber stats: %s", e)
+        return await callback.answer("❌ Ma'lumotni olishda xatolik yuz berdi.", show_alert=True)
 
+    total_orders = int(total_orders or 0)
+    today_orders = int(today_orders or 0)
 
-# --- ⬅️ Orqaga qaytish ---
-@router.callback_query(F.data == "back_to_stats")
-async def back_to_stats(callback: types.CallbackQuery):
-    """Orqaga tugmasi bosilganda umumiy statistikaga qaytish"""
+    text = (
+        f"💈 <b>{barber.barber_fullname}</b> statistikasi:\n\n"
+        f"📦 <b>Jami buyurtmalar:</b> {total_orders}\n"
+        f"📅 <b>Bugungi buyurtmalar:</b> {today_orders}"
+    )
+
+    back_button = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_stats")]]
+    )
+
     try:
-        await callback.message.delete()
-        await show_stats(callback.message)
-        await callback.answer()
+        await callback.message.edit_text(text, reply_markup=back_button, parse_mode="HTML")
     except Exception:
+        await callback.message.answer(text, reply_markup=back_button, parse_mode="HTML")
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_stats")
+async def back_to_stats(callback: CallbackQuery):
+    try:
+        if callback.message:
+            try:
+                await callback.message.delete()
+            except Exception:
+                logger.debug("Could not delete callback.message (maybe already deleted).")
+        await send_overall_stats(callback)
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Error in back_to_stats: %s", e)
         await callback.answer("❌ Qaytishda xatolik yuz berdi.", show_alert=True)
 
 
-# --- ❌ Foydasiz callbacklar uchun ---
 @router.callback_query(F.data == "none")
-async def none_callback(callback: types.CallbackQuery):
-    """‘Barberlar mavjud emas’ tugmasi bosilganda"""
+async def none_callback(callback: CallbackQuery):
     await callback.answer("ℹ️ Hozircha maʼlumot yo‘q.", show_alert=True)
