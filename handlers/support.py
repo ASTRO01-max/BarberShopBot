@@ -5,7 +5,7 @@ from aiogram.filters import Command
 
 router = Router()
 
-# Har bir foydalanuvchi uchun bot yuborgan va foydalanuvchi yuborgan xabar IDlari
+
 user_messages = {}
 
 async def send_and_store(message: Message, text: str, reply_markup=None):

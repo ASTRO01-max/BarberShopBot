@@ -41,7 +41,7 @@ class Order(Base):
     booked_date = Column(Date, nullable=False)
     booked_time = Column(Time, nullable=False)
 
-
+#Admin foydalanuvchilar
 class Admins(Base):
     __tablename__ = "admins"
 
@@ -73,4 +73,11 @@ class Services(Base):
     duration = Column(String(50), nullable=False)
 
 
+class SuperAdmins(Base):
+    __tablename__ = "superadmins"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tg_id = Column(BigInteger, unique=True, nullable=False)
+    super_admin_fullname = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
 
