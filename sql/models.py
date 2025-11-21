@@ -1,5 +1,6 @@
 # sql/models.py
 from sqlalchemy import Column, Integer, BigInteger, String, Date, Time
+from sqlalchemy import LargeBinary
 from sql.db import Base
 
 
@@ -54,10 +55,13 @@ class Barbers(Base):
     __tablename__ = "barbers"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tg_id = Column(BigInteger, unique=True, nullable=False)
+    tg_username = Column()
     barber_fullname = Column(String(255), nullable=False)
     phone = Column(String(50), nullable=True)
     experience = Column(String(50), nullable=False)
     work_days = Column(String(50), nullable=False)
+    photo = Column(LargeBinary, nullable=True)
 
 
 class Services(Base):
@@ -67,3 +71,6 @@ class Services(Base):
     name = Column(String(100), unique=True, nullable=False)
     price = Column(Integer, nullable=False)
     duration = Column(String(50), nullable=False)
+
+
+

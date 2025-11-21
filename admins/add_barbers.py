@@ -66,15 +66,28 @@ async def add_barber_work_days(message: types.Message, state: FSMContext):
     if len(work_days) < 3:
         return await message.answer("❌ Ish kunlari noto‘g‘ri kiritildi. Qaytadan kiriting:")
 
+    await state.update_data(work_days=work_days)
+
+    await state.set_state(AdminStates.adding_barber_photo)
+    await message.answer("🖼 Endi barberning rasmini yuboring (1 dona, JPG/PNG):")
+
+
+# --- 6️⃣ Rasmni qabul qilish va BARCHA ma’lumotni bir martada SQLga yozish ---
+@router.message(StateFilter(AdminStates.adding_barber_photo), F.photo)
+async def add_barber_photo(message: types.Message, state: FSMContext):
+    photo_file_id = message.photo[-1].file_id
+    file = await message.bot.get_file(photo_file_id)
+    photo_bytes = await message.bot.download_file(file.file_path)
+
     data = await state.get_data()
 
-    # ✅ Bazaga yozish
     async with async_session() as session:
         new_barber = Barbers(
             barber_fullname=data["fullname"],
             phone=data["phone"],
             experience=data["experience"],
-            work_days=work_days
+            work_days=data["work_days"],
+            photo=photo_bytes.read()
         )
         session.add(new_barber)
         await session.commit()
@@ -84,8 +97,9 @@ async def add_barber_work_days(message: types.Message, state: FSMContext):
         f"👨‍🎤 <b>{data['fullname']}</b>\n"
         f"📞 <b>{data['phone']}</b>\n"
         f"💼 <b>{data['experience']}</b>\n"
-        f"📅 <b>{work_days}</b>",
+        f"📅 <b>{data['work_days']}</b>",
         parse_mode="HTML"
     )
 
     await state.clear()
+

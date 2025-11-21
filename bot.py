@@ -1,6 +1,5 @@
 import asyncio
 from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart
 from config import BOT_TOKEN
 from utils.logger import setup_logger
 from admins import router as admins_router

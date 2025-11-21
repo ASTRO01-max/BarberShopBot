@@ -20,6 +20,7 @@ class AdminStates(StatesGroup):
     adding_admin_phone = State()
     adding_service = State()
     adding_barber = State()
+    adding_barber_photo = State()
     adding_service = State()           # Servis nomini kutish
     adding_service_price = State()     # Servis narxini kutish
     adding_service_duration = State() 
