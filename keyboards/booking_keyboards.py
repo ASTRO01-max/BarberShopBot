@@ -8,7 +8,6 @@ from utils.emoji_map import SERVICE_EMOJIS
 
 
 def back_button() -> InlineKeyboardMarkup:
-    """Orqaga qaytish tugmasi."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back")]
@@ -17,9 +16,6 @@ def back_button() -> InlineKeyboardMarkup:
 
 
 async def service_keyboard() -> InlineKeyboardMarkup:
-    """
-    Xizmatlar ro‘yxatini bazadan olib, inline button shaklida qaytaradi.
-    """
     builder = InlineKeyboardBuilder()
     try:
         async with async_session() as session:
@@ -46,9 +42,6 @@ async def service_keyboard() -> InlineKeyboardMarkup:
 
 
 async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
-    """
-    Sartaroshlar ro‘yxatini bazadan olib, tanlangan xizmat uchun inline buttonlar yaratadi.
-    """
     builder = InlineKeyboardBuilder()
     try:
         async with async_session() as session:
@@ -60,8 +53,8 @@ async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
         else:
             for b in barbers:
                 builder.button(
-                    text=b.barber_fullname,
-                    callback_data=f"barber_{service_id}_{b.barber_fullname}"  # ⚠️ id o‘rniga nom ishlatildi
+                    text=f"{b.barber_first_name} {b.barber_last_name or ''}",
+                    callback_data=f"barber_{service_id}_{b.barber_first_name}"   # ← Siz xohlagan format
                 )
 
         builder.adjust(1)
@@ -73,10 +66,8 @@ async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
         return builder.as_markup()
 
 
+
 def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup:
-    """
-    Keyingi 3 kunlik sana tanlash uchun tugmalar.
-    """
     now = datetime.now()
     builder = InlineKeyboardBuilder()
     for i in range(3):
@@ -87,9 +78,6 @@ def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup:
 
 
 async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKeyboardMarkup:
-    """
-    Tanlangan sana bo‘yicha mavjud vaqtlar tugmalari.
-    """
     all_times = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
 
     from sql.db_order_utils import get_booked_times

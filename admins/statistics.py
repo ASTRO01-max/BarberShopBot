@@ -52,7 +52,7 @@ async def send_overall_stats(target: Union[types.Message, types.Chat, types.Call
     # build inline keyboard
     if barbers:
         buttons = [
-            [InlineKeyboardButton(text=f"💈 {b.barber_fullname}", callback_data=f"barber:{int(b.id)}")]
+            [InlineKeyboardButton(text=f"💈 {b.barber_first_name} {b.barber_last_name}", callback_data=f"barber:{int(b.id)}")]
             for b in barbers
         ]
     else:
@@ -107,11 +107,11 @@ async def barber_stats(callback: types.CallbackQuery):
 
             # 🔥 Muammo shu joyda edi — endi fullname bo‘yicha solishtiramiz:
             total_orders = await session.scalar(
-                select(func.count(Order.id)).where(Order.barber_id == barber.barber_fullname)
+                select(func.count(Order.id)).where(Order.barber_id == barber.barber_first_name)
             )
             today_orders = await session.scalar(
                 select(func.count(Order.id)).where(
-                    and_(Order.barber_id == barber.barber_fullname, func.date(Order.booked_date) == today)
+                    and_(Order.barber_id == barber.barber_first_name, func.date(Order.booked_date) == today)
                 )
             )
     except SQLAlchemyError as e:
@@ -122,7 +122,7 @@ async def barber_stats(callback: types.CallbackQuery):
     today_orders = int(today_orders or 0)
 
     text = (
-        f"💈 <b>{barber.barber_fullname}</b> statistikasi:\n\n"
+        f"💈 <b>{barber.barber_first_name}</b> statistikasi:\n\n"
         f"📦 <b>Jami buyurtmalar:</b> {total_orders}\n"
         f"📅 <b>Bugungi buyurtmalar:</b> {today_orders}"
     )

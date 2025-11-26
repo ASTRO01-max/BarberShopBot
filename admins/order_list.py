@@ -1,3 +1,4 @@
+#admins/order_list.py
 from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -10,7 +11,6 @@ router = Router()
 ORDERS_PER_PAGE = 5
 
 
-# 📄 Sahifani shakllantirish funksiyasi
 async def get_orders_page(page: int):
     offset = max(0, page) * ORDERS_PER_PAGE
 
@@ -29,12 +29,12 @@ async def get_orders_page(page: int):
     except Exception as e:
         # Log yoki print — developmentda ko'rish uchun
         print("get_orders_page DB error:", repr(e))
-        return "❗ Buyurtmalarni olishda xatolik yuz berdi.", None, 0
+        return "❗ Navbatlar olishda xatolik yuz berdi.", None, 0
 
     if not orders:
-        return "📂 Buyurtmalar topilmadi.", None, total_orders
+        return "📂 Navbatlar topilmadi.", None, total_orders
 
-    response = f"📋 <b>Buyurtmalar ro'yxati (sahifa {page + 1})</b>\n\n"
+    response = f"📋 <b>Navbatlar ro'yxati (sahifa {page + 1})</b>\n\n"
     for idx, order in enumerate(orders, start=offset + 1):
         # xavfsiz atribut olish (None bo'lsa bo'sh)
         fullname = getattr(order, "fullname", "") or ""
@@ -43,27 +43,43 @@ async def get_orders_page(page: int):
         service_id = getattr(order, "service_id", "") or ""
         order_date = getattr(order, "date", "") or ""
         order_time = getattr(order, "time", "") or ""
+        order_booked_date = getattr(order, "booked_date", "") or ""
+        order_booked_time = getattr(order, "booked_time", "") or ""
 
         response += (
-            f"📌 <b>Buyurtma {idx}</b>\n"
+            f"📌 <b>Navbat {idx}</b>\n"
             f"👤 <b>Mijoz:</b> {fullname}\n"
             f"📞 <b>Tel:</b> {phonenumber}\n"
             f"💈 <b>Barber ID:</b> {barber_id}\n"
             f"✂️ <b>Xizmat ID:</b> {service_id}\n"
             f"🗓 <b>Sana:</b> {order_date}\n"
-            f"⏰ <b>Vaqt:</b> {order_time}\n\n"
+            f"⏰ <b>Vaqt:</b> {order_time}\n"
+            f"🗓 <b>Navbat olingan sana:</b> {order_booked_date}\n"
+            f"🗓 <b>Navbat olingan vaqt:</b> {order_booked_time}\n\n"
         )
 
     # Tugmalarni tayyorlash — har birini alohida qatorda qo'yamiz
     rows = []
+    nav_buttons = []
+
+    # Oldingi sahifa mavjud bo‘lsa → qo‘shamiz
     if page > 0:
-        rows.append([InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"prev_page:{page-1}")])
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"prev_page:{page-1}")
+        )
+
+    # Keyingi sahifa mavjud bo‘lsa → qo‘shamiz
     if offset + ORDERS_PER_PAGE < total_orders:
-        rows.append([InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"next_page:{page+1}")])
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"next_page:{page+1}")
+        )
+
+    # Agar kamida bitta tugma bo‘lsa, barchasini bitta qatorda joylaymiz
+    if nav_buttons:
+        rows = [nav_buttons]
 
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
     return response, markup, total_orders
-
 
 
 # 🗂 Buyurtmalar ro'yxatini chiqarish

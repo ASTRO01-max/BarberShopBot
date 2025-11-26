@@ -21,7 +21,7 @@ async def list_barbers_for_delete(message: types.Message):
     buttons = [
         [
             types.InlineKeyboardButton(
-                text=f"👨‍🎤 {barber.barber_fullname} — 📞 {barber.phone or 'N/A'}",
+                text=f"👨‍🎤 {barber.barber_first_name} {barber.barber_last_name} — 📞 {barber.phone or 'N/A'}",
                 callback_data=f"delete_barber:{barber.id}"
             )
         ]
@@ -42,11 +42,12 @@ async def delete_barber_callback(callback: types.CallbackQuery):
         if not barber:
             return await callback.answer("❌ Barber topilmadi!", show_alert=True)
 
-        name = barber.barber_fullname
+        name = barber.barber_first_name
+        last_name = barber.barber_last_name
         await session.delete(barber)
         await session.commit()
 
-    await callback.answer(f"✅ '{name}' barber o‘chirildi!", show_alert=True)
+    await callback.answer(f"✅ '{name}' '{last_name}' barber o‘chirildi!", show_alert=True)
 
     # 🔄 Qolgan barberlarni yangilab chiqarish
     async with async_session() as session:
@@ -59,7 +60,7 @@ async def delete_barber_callback(callback: types.CallbackQuery):
     buttons = [
         [
             types.InlineKeyboardButton(
-                text=f"👨‍🎤 {barber.barber_fullname} — 📞 {barber.phone or 'N/A'}",
+                text=f"👨‍🎤 {barber.barber_first_name} {barber.barber_last_name} — 📞 {barber.phone or 'N/A'}",
                 callback_data=f"delete_barber:{barber.id}"
             )
         ]

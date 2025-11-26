@@ -20,7 +20,7 @@ async def show_barbers(callback: types.CallbackQuery):
     text = "💈 <b>Bizning ustalar ro'yxati:</b>\n\n"
     for b in barbers:
         text += (
-            f"💈 <b>{b.barber_fullname}</b>\n"
+            f"💈 <b>{b.barber_first_name} {b.barber_last_name}</b>\n"
             f"💼 <i>Tajribasi:</i> {b.experience}\n"
             f"📅 <i>Ish kunlari:</i> {b.work_days}\n"
             f"📞 <i>Telefon:</i> <code>{b.phone}</code>\n"

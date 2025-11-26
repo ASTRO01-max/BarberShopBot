@@ -1,16 +1,21 @@
+# admins/add_barbers.py
 from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from utils.states import AdminStates
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sql.db import async_session
 from sql.models import Barbers
+from sql.models import OrdinaryUser
 
 router = Router()
+
 
 # --- 1️⃣ Boshlanish ---
 @router.message(F.text == "👨‍🎤 Barber qo'shish")
 async def add_barber_start(message: types.Message, state: FSMContext):
+    await state.clear()
     await state.set_state(AdminStates.adding_barber_fullname)
     await message.answer("🧔‍♂️ Yangi barberning to‘liq ismini kiriting:")
 
@@ -19,19 +24,29 @@ async def add_barber_start(message: types.Message, state: FSMContext):
 @router.message(StateFilter(AdminStates.adding_barber_fullname))
 async def add_barber_fullname(message: types.Message, state: FSMContext):
     fullname = message.text.strip()
-    if len(fullname) < 3:
-        return await message.answer("❌ To‘liq ism juda qisqa. Qaytadan kiriting:")
+    if len(fullname.split()) < 2:
+        return await message.answer("❌ Iltimos to‘liq ism (Ism Familiya) kiriting.")
 
-    # Bunday ism mavjudligini tekshirish
+    first_name, last_name = fullname.split(" ", 1)
+
     async with async_session() as session:
-        result = await session.execute(select(Barbers).where(Barbers.barber_fullname.ilike(fullname)))
-        existing = result.scalar()
-        if existing:
-            return await message.answer("⚠️ Bu ismli barber allaqachon mavjud.")
 
-    await state.update_data(fullname=fullname)
+        q = select(Barbers).where(Barbers.barber_first_name.ilike(f"%{fullname}%"))
+        existing = (await session.execute(q)).scalars().first()
+        if existing:
+            return await message.answer("⚠️ Bu ismga o‘xshash barber allaqachon mavjud.")
+
+        u = select(OrdinaryUser).where(
+            OrdinaryUser.first_name.ilike(f"%{first_name}%"),
+            OrdinaryUser.last_name.ilike(f"%{last_name}%")
+        )
+        user = (await session.execute(u)).scalars().first()
+
+        tg_id = user.tg_id if user else None
+
+    await state.update_data(fullname=fullname, tg_id=tg_id)
     await state.set_state(AdminStates.adding_barber_phone)
-    await message.answer("📞 Barber telefon raqamini kiriting (+998 bilan):")
+    await message.answer("📞 Barber telefon raqamini kiriting (masalan: +998901234567):")
 
 
 # --- 3️⃣ Telefon raqamini olish ---
@@ -59,7 +74,7 @@ async def add_barber_experience(message: types.Message, state: FSMContext):
     await message.answer("📅 Barberning ish kunlarini kiriting (masalan: Dushanba–Juma):")
 
 
-# --- 5️⃣ Ish kunlarini olish va bazaga yozish ---
+# --- 5️⃣ Ish kunlarini olish va foto kerakligini so'rash ---
 @router.message(StateFilter(AdminStates.adding_barber_work_days))
 async def add_barber_work_days(message: types.Message, state: FSMContext):
     work_days = message.text.strip()
@@ -68,38 +83,106 @@ async def add_barber_work_days(message: types.Message, state: FSMContext):
 
     await state.update_data(work_days=work_days)
 
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Ha ✅", callback_data="add_photo_yes"),
+            InlineKeyboardButton(text="Yo‘q ❌", callback_data="add_photo_no"),
+        ]
+    ])
+
+    await message.answer("🖼 Barber uchun rasm qo‘shasizmi?", reply_markup=markup)
+    await state.set_state(AdminStates.adding_photo_choice)
+
+
+# --- Callback: admin "Yo'q" tanlasa (rasmsiz saqlash) ---
+@router.callback_query(F.data == "add_photo_no", StateFilter(AdminStates.adding_photo_choice))
+async def save_without_photo(call: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    fullname = data.get("fullname")
+    phone = data.get("phone")
+    experience = data.get("experience")
+    work_days = data.get("work_days")
+
+    if not (fullname and phone and experience and work_days):
+        await call.answer("❌ Ma'lumotlar yetarli emas. Iltimos jarayonni qayta boshlang.", show_alert=True)
+        await state.clear()
+        return
+
+    async with async_session() as session:
+        new_barber = Barbers(
+            barber_first_name=fullname,
+            phone=phone,
+            experience=experience,
+            work_days=work_days,
+            photo=None
+        )
+        session.add(new_barber)
+        await session.commit()
+
+    await call.message.answer(
+        f"✅ Rasm qo‘shilmasdan barber saqlandi!\n\n"
+        f"👨‍🎤 <b>{fullname}</b>\n"
+        f"📞 <b>{phone}</b>\n"
+        f"💼 <b>{experience}</b>\n"
+        f"📅 <b>{work_days}</b>",
+        parse_mode="HTML"
+    )
+
+    await state.clear()
+    await call.answer()
+
+
+# --- Callback: admin "Ha" tanlasa (rasm yuborish bosqichi) ---
+@router.callback_query(F.data == "add_photo_yes", StateFilter(AdminStates.adding_photo_choice))
+async def ask_for_photo(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.adding_barber_photo)
-    await message.answer("🖼 Endi barberning rasmini yuboring (1 dona, JPG/PNG):")
+    await call.message.answer("🖼 Iltimos, barberning rasmini yuboring (JPG/PNG):")
+    await call.answer()
 
 
 # --- 6️⃣ Rasmni qabul qilish va BARCHA ma’lumotni bir martada SQLga yozish ---
 @router.message(StateFilter(AdminStates.adding_barber_photo), F.photo)
 async def add_barber_photo(message: types.Message, state: FSMContext):
-    photo_file_id = message.photo[-1].file_id
-    file = await message.bot.get_file(photo_file_id)
-    photo_bytes = await message.bot.download_file(file.file_path)
+    photo_file = message.photo[-1]
+    file = await message.bot.get_file(photo_file.file_id)
+    photo_stream = await message.bot.download_file(file.file_path)
+    photo_bytes = photo_stream.read()
 
     data = await state.get_data()
+    fullname = data.get("fullname")
+    phone = data.get("phone")
+    experience = data.get("experience")
+    work_days = data.get("work_days")
+
+    if not (fullname and phone and experience and work_days):
+        await message.answer("❌ Ma'lumotlar yetarli emas. Iltimos jarayonni qayta boshlang.")
+        await state.clear()
+        return
 
     async with async_session() as session:
         new_barber = Barbers(
-            barber_fullname=data["fullname"],
-            phone=data["phone"],
-            experience=data["experience"],
-            work_days=data["work_days"],
-            photo=photo_bytes.read()
+            barber_first_name=fullname,
+            phone=phone,
+            experience=experience,
+            work_days=work_days,
+            photo=photo_bytes
         )
         session.add(new_barber)
         await session.commit()
 
     await message.answer(
-        f"✅ Yangi barber muvaffaqiyatli qo‘shildi!\n\n"
-        f"👨‍🎤 <b>{data['fullname']}</b>\n"
-        f"📞 <b>{data['phone']}</b>\n"
-        f"💼 <b>{data['experience']}</b>\n"
-        f"📅 <b>{data['work_days']}</b>",
+        f"✅ Rasm bilan barber qo‘shildi!\n\n"
+        f"👨‍🎤 <b>{fullname}</b>\n"
+        f"📞 <b>{phone}</b>\n"
+        f"💼 <b>{experience}</b>\n"
+        f"📅 <b>{work_days}</b>",
         parse_mode="HTML"
     )
 
     await state.clear()
 
+
+# Optional: fallback — agar admin rasm yuborish o'rniga boshqa matn yuborsa
+@router.message(StateFilter(AdminStates.adding_barber_photo))
+async def photo_expected_but_got_text(message: types.Message, state: FSMContext):
+    await message.answer("❌ Iltimos rasm yuboring yoki 'Yo‘q ❌' tugmasini bosib rasm qo‘shmaslikni tanlang.")

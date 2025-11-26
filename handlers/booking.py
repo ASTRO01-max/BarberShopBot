@@ -92,7 +92,6 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
 
 # --- 5-qadam: Usta tanlash ---
-# --- 5-qadam: Usta tanlash ---
 async def book_step2(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     if len(parts) < 3:
