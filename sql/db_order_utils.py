@@ -93,11 +93,13 @@ async def save_order(order: dict):
             # Reraising: caller may handle it (telegram handler should catch and reply to user)
             raise
 
+
 # Qo'shimcha util funksiyalar (keltirilgan siz ishlatgan shaklga mos)
 async def load_orders():
     async with async_session() as session:
         result = await session.execute(select(Order))
         return result.scalars().all()
+
 
 async def get_booked_times(barber_id: str, date_str: str):
     """
@@ -107,7 +109,7 @@ async def get_booked_times(barber_id: str, date_str: str):
         # string → datetime.date
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
-        raise ValueError(f"❌ Noto‘g‘ri sana formati: {date_str}, kerak: YYYY-MM-DD")
+        raise ValueError(f"❌ Noto‘g‘ri sana formati: {date_str}, kerak: DD-MM-YYYY")
 
     async with async_session() as session:
         result = await session.execute(

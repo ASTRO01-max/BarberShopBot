@@ -14,6 +14,14 @@ def back_button() -> InlineKeyboardMarkup:
         ]
     )
 
+# Haftaning kunlari nomlari (uzbekcha)
+WEEKDAYS = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"]
+
+# Oy nomlari (uzbekcha)
+MONTHS = [
+    "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
+    "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"
+]
 
 async def service_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -66,13 +74,24 @@ async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
         return builder.as_markup()
 
 
-
 def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup:
     now = datetime.now()
     builder = InlineKeyboardBuilder()
-    for i in range(3):
-        day = (now.date() + timedelta(days=i)).strftime("%Y-%m-%d")
-        builder.button(text=day, callback_data=f"date_{service_id}_{barber_id}_{day}")
+
+    for i in range(7):
+        current_day = now + timedelta(days=i)
+
+        day = current_day.day
+        month = MONTHS[current_day.month - 1]
+        weekday = WEEKDAYS[current_day.weekday()]
+
+        text = f"{day}-{month} {weekday}"
+
+        # <<<< ASOSIY TUZATISH >>>>
+        callback = f"date_{service_id}_{barber_id}_{current_day.strftime('%Y-%m-%d')}"
+
+        builder.button(text=text, callback_data=callback)
+
     builder.adjust(1)
     return builder.as_markup()
 

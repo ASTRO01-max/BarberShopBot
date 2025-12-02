@@ -7,12 +7,13 @@ from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
 from sql.db_order_utils import save_order
 from utils.states import UserState
-from utils.validators import *
+from utils.validators import parse_user_date, validate_phone, parse_int_safe
 from sql.db_users_utils import get_user, save_user
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = Router()
+
 
 # --- 1-qadam: Boshlash ---
 async def start_booking(callback: types.CallbackQuery, state: FSMContext):
@@ -109,7 +110,6 @@ async def book_step2(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-
 # --- 6-qadam: Sana tanlash ---
 async def book_step3(callback: CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date = callback.data.split("_")
@@ -135,6 +135,39 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(UserState.waiting_for_time)
     await callback.answer()
+
+
+# --- 6-qadam: Sana (matn ko‘rinishida) ---
+@router.message(UserState.waiting_for_date)
+async def book_step3_message(message: Message, state: FSMContext):
+    user_text = message.text.strip()
+
+    from utils.validators import parse_user_date
+    date = parse_user_date(user_text)
+
+    if not date:
+        await message.answer(
+            "❌ Kechirasiz, biz faqat joriy oy ichidagi sanalarni qabul qilamiz.\n"
+            "Iltimos, shu oydagi amal qiladigan sanani kiriting."
+        )
+
+        return
+
+    await state.update_data(date=date)
+
+    user_data = await state.get_data()
+    service_id = user_data.get("service_id")
+    barber_id = user_data.get("barber_id")
+
+    from keyboards import booking_keyboards
+    keyboard = await booking_keyboards.time_keyboard(service_id, barber_id, date)
+
+    if keyboard is None:
+        await message.answer("❌ Bu kunda bo‘sh vaqt yo‘q. Boshqa sana kiriting.")
+        return
+
+    await message.answer("⏰ Vaqtni tanlang:", reply_markup=keyboard)
+    await state.set_state(UserState.waiting_for_time)
 
 
 # --- Orqaga qaytish ---

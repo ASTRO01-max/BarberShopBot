@@ -102,6 +102,11 @@ dp.message.register(
     booking.UserState.waiting_for_phonenumber
 )
 
+dp.message.register(
+    booking.book_step3_message,
+    booking.UserState.waiting_for_date
+)
+
 # Asosiy ishga tushirish
 async def main():
     setup_logger()
