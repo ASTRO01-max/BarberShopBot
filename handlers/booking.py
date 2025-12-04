@@ -35,7 +35,7 @@ async def start_booking(callback: types.CallbackQuery, state: FSMContext):
         )
         await state.set_state(UserState.waiting_for_fullname)
 
-    await callback.answer()
+    await callback.answer("Navbat olish boshlandi ✅")
 
 
 # --- 2-qadam: Foydalanuvchi ism kiritadi ---
@@ -89,7 +89,7 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
         reply_markup=await booking_keyboards.barber_keyboard(service_id)
     )
     await state.set_state(UserState.waiting_for_barber)
-    await callback.answer()
+    await callback.answer("👤 Ism va raqam qabul qilindi ✅")
 
 
 # --- 5-qadam: Usta tanlash ---
@@ -107,7 +107,7 @@ async def book_step2(callback: CallbackQuery, state: FSMContext):
         reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
     )
     await state.set_state(UserState.waiting_for_date)
-    await callback.answer()
+    await callback.answer("🧑‍🎤 Usta tanlandi ✅")
 
 
 # --- 6-qadam: Sana tanlash ---
@@ -134,7 +134,7 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("⏰ Vaqt tanlang:", reply_markup=keyboard)
 
     await state.set_state(UserState.waiting_for_time)
-    await callback.answer()
+    await callback.answer("📅 Sana qabul qilindi ✅")
 
 
 # --- 6-qadam: Sana (matn ko‘rinishida) ---
@@ -178,7 +178,7 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
         reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
     )
     await state.set_state(UserState.waiting_for_date)
-    await callback.answer()
+    await callback.answer("📅 Sana qabul qilindi ✅")
 
 # ✅ Tasdiqlash bosqichi
 @router.callback_query(F.data.startswith("confirm_"))

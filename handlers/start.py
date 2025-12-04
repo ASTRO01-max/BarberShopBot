@@ -1,11 +1,12 @@
-# handlers/start.py
 from aiogram import Router, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sql.db import async_session
 from sql.models import OrdinaryUser
-from keyboards.main_buttons import get_dynamic_main_keyboard  
+from aiogram.types import FSInputFile   
+from keyboards.start_btns import start_button
+from keyboards.main_buttons import get_dynamic_main_keyboard
 from keyboards.main_menu import get_main_menu
 
 import unicodedata
@@ -23,28 +24,48 @@ def normalize_fancy(text: str) -> str:
     return clean
 
 
+# --- 1. /start → video + tugma chiqarish ---
 @router.message(CommandStart())
+async def start_message(message: types.Message):
+
+    video = FSInputFile("C:/Users/hp/Desktop/bot ishlashi.mp4")
+
+    await message.answer_video(
+        video=video,
+        caption=(
+            "👋 Assalomu alaykum!\n"
+            "Bu bot orqali barbershop xizmatlariga onlayn navbat olishingiz mumkin.\n\n"
+            "👇 Boshlash tugmasini bosing:"
+        ),
+        reply_markup=start_button
+    )
+
+
+# --- 2. Boshlash tugmasi bosilganda → userni ro‘yxatga olish ---
+@router.callback_query(lambda c: c.data == "start_bot")
+async def start_bot_pressed(callback: types.CallbackQuery, state: FSMContext):
+    await register_user(callback.message, state)
+    await callback.answer()
+
+
+# --- 3. Ro‘yxatga olish va menyu chiqarish ---
 async def register_user(message: types.Message, state: FSMContext):
     """Foydalanuvchini birinchi marta start bosganda bazaga yozadi va menyuni ko‘rsatadi."""
     tg_id = message.from_user.id
 
-    # --- Foydalanuvchini olamiz ---
     first_name_raw = message.from_user.first_name
     last_name_raw = message.from_user.last_name
     username = message.from_user.username
 
-    # --- 🔥 Autolatin / normalize qilish ---
     first_name = normalize_fancy(first_name_raw)
     last_name = normalize_fancy(last_name_raw)
 
     async with async_session() as session:
-        # Foydalanuvchi bor-yo‘qligini tekshirish
         result = await session.execute(
             select(OrdinaryUser).where(OrdinaryUser.tg_id == tg_id)
         )
         user = result.scalars().first()
 
-        # Yangi foydalanuvchini yaratish
         if not user:
             new_user = OrdinaryUser(
                 tg_id=tg_id,
@@ -55,15 +76,12 @@ async def register_user(message: types.Message, state: FSMContext):
             session.add(new_user)
             await session.commit()
 
-    # FSM tozalanadi
     await state.clear()
 
-    # Asosiy menyu
     keyboard = await get_dynamic_main_keyboard(tg_id)
 
     await message.answer(
-        "👋 Assalomu alaykum, botga xush kelibsiz!\n"
-        "Quyidagi menyudan birini tanlang:",
+        "👋 Xush kelibsiz! Quyidagi menyudan birini tanlang:",
         reply_markup=keyboard
     )
 
