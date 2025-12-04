@@ -14,7 +14,8 @@ from handlers import (
     booking,
     back,
     main_btn_handle,
-    support
+    support,
+    file_id
 )
 
 # Bot va Dispatcher obyektlari
@@ -33,6 +34,8 @@ dp.include_router(admins_router)
 
 #SUPPORT_PANEL
 dp.include_router(support.router)
+
+dp.include_router(file_id.router)
 
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(

@@ -28,10 +28,10 @@ def normalize_fancy(text: str) -> str:
 @router.message(CommandStart())
 async def start_message(message: types.Message):
 
-    video = FSInputFile("C:/Users/hp/Desktop/bot ishlashi.mp4")
+    video_id = "BAACAgIAAxkBAAIVxmkxXVuPN86bVFGK6AyeHgYjG8uuAALwigACDqCISf-pQ9Z1AlDhNgQ"
 
     await message.answer_video(
-        video=video,
+        video=video_id,
         caption=(
             "👋 Assalomu alaykum!\n"
             "Bu bot orqali barbershop xizmatlariga onlayn navbat olishingiz mumkin.\n\n"
@@ -45,7 +45,7 @@ async def start_message(message: types.Message):
 @router.callback_query(lambda c: c.data == "start_bot")
 async def start_bot_pressed(callback: types.CallbackQuery, state: FSMContext):
     await register_user(callback.message, state)
-    await callback.answer()
+    await callback.answer("🚀 Bot ishga tushdi ✅")
 
 
 # --- 3. Ro‘yxatga olish va menyu chiqarish ---
