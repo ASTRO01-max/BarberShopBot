@@ -85,7 +85,7 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
     service_id = callback.data.split("_")[1]
     await state.update_data(service_id=service_id)
     await callback.message.edit_text(
-        "🧑‍🎤 Usta tanlang:",
+        "💈Barberni tanlang:",
         reply_markup=await booking_keyboards.barber_keyboard(service_id)
     )
     await state.set_state(UserState.waiting_for_barber)

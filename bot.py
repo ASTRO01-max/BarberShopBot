@@ -5,7 +5,6 @@ from utils.logger import setup_logger
 from admins import router as admins_router
 from sql.db import init_db
 
-# Handlers importlari
 from handlers import (
     start,
     services,
@@ -15,7 +14,6 @@ from handlers import (
     back,
     main_btn_handle,
     support,
-    file_id
 )
 
 # Bot va Dispatcher obyektlari
@@ -35,8 +33,6 @@ dp.include_router(admins_router)
 #SUPPORT_PANEL
 dp.include_router(support.router)
 
-dp.include_router(file_id.router)
-
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(
     services.show_services,
@@ -48,6 +44,19 @@ dp.callback_query.register(
     barbers.show_barbers,
     lambda c: c.data == "barbers"
 )
+
+# Ustalar menyusi
+dp.callback_query.register(
+    barbers.show_barbers,
+    lambda c: c.data == "barbers"
+)
+
+# Next / Prev
+dp.callback_query.register(
+    barbers.navigate_barbers,
+    lambda c: c.data.startswith(("barber_next_", "barber_prev_"))
+)
+
 
 # Bog‘lanish uchun
 dp.callback_query.register(

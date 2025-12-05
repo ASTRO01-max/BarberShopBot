@@ -55,14 +55,15 @@ class Barbers(Base):
     __tablename__ = "barbers"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    tg_id = Column(BigInteger, unique=True, nullable=True)
+    tg_id = Column(BigInteger, nullable=True)
     tg_username = Column(String(255), nullable=True)
     barber_first_name = Column(String(100), nullable=True)
     barber_last_name = Column(String(100), nullable=True)
     phone = Column(String(50), nullable=True)
     experience = Column(String(50), nullable=False)
     work_days = Column(String(50), nullable=False)
-    photo = Column(LargeBinary, nullable=True)
+    photo = Column(String(300), nullable=True)
+
 
 
 class Services(Base):

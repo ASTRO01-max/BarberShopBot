@@ -5,7 +5,7 @@ def get_main_menu():
     buttons = [
         ("🗓️ Navbat olish", "book"),
         ("💈 Xizmatlar", "services"),
-        ("👨‍🎤 Ustalar", "barbers"),
+        ("💈 Barberlar", "barbers"),
         ("📞 Bog'lanish", "contact")
     ]
     for text, data in buttons:

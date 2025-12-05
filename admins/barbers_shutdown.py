@@ -8,7 +8,7 @@ from .admin_buttons import markup
 router = Router()
 
 # 🧾 Barcha barberlarni button ko‘rinishida chiqarish
-@router.message(F.text == "👨‍🎤 Barberni o'cirish")
+@router.message(F.text == "💈 Barberni o'cirish")
 async def list_barbers_for_delete(message: types.Message):
     async with async_session() as session:
         result = await session.execute(select(Barbers))
@@ -21,7 +21,7 @@ async def list_barbers_for_delete(message: types.Message):
     buttons = [
         [
             types.InlineKeyboardButton(
-                text=f"👨‍🎤 {barber.barber_first_name} {barber.barber_last_name} — 📞 {barber.phone or 'N/A'}",
+                text=f"💈 {barber.barber_first_name} {barber.barber_last_name} — 📞 {barber.phone or 'N/A'}",
                 callback_data=f"delete_barber:{barber.id}"
             )
         ]
@@ -60,7 +60,7 @@ async def delete_barber_callback(callback: types.CallbackQuery):
     buttons = [
         [
             types.InlineKeyboardButton(
-                text=f"👨‍🎤 {barber.barber_first_name} {barber.barber_last_name} — 📞 {barber.phone or 'N/A'}",
+                text=f"💈 {barber.barber_first_name} {barber.barber_last_name} — 📞 {barber.phone or 'N/A'}",
                 callback_data=f"delete_barber:{barber.id}"
             )
         ]
