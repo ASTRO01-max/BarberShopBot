@@ -1,3 +1,4 @@
+#keyboards/main_buttons.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from sql.db_users_utils import get_user
 

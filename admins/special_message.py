@@ -19,7 +19,7 @@ async def start_broadcast(message: types.Message, state: FSMContext):
         "❌ Bekor qilish uchun /cancel yuboring."
     )
 
-# --- Bekor qilish komandasi ---
+# --- Bekor qilish buyrug'i ---
 @router.message(F.text == "/cancel")
 async def cancel_broadcast(message: types.Message, state: FSMContext):
     """Yuborish jarayonini bekor qilish"""

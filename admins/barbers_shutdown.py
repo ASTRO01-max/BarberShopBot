@@ -7,7 +7,7 @@ from .admin_buttons import markup
 
 router = Router()
 
-# 🧾 Barcha barberlarni button ko‘rinishida chiqarish
+# 🧾 Barcha barberlarni button ko‘rinishida chiqaradi
 @router.message(F.text == "💈 Barberni o'cirish")
 async def list_barbers_for_delete(message: types.Message):
     async with async_session() as session:

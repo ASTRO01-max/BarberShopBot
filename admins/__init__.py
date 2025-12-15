@@ -1,4 +1,5 @@
 # admins/__init__.py
+#barcha fayillarni toplash
 from aiogram import Router
 
 from .admin import router as admin_router

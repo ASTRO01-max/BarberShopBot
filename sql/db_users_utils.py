@@ -25,7 +25,7 @@ async def save_user(data: Dict) -> Optional[User]:
 
     async with async_session() as session:
         try:
-            # Avval mavjud foydalanuvchini qidiramiz
+            # Avval mavjud foydalanuvchini qidiradi
             res = await session.execute(select(User).where(User.tg_id == tg_id))
             user = res.scalar_one_or_none()
 

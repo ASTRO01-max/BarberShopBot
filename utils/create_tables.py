@@ -1,3 +1,4 @@
+#utils/create_tables.py
 import asyncio
 from sql.db import init_db
 

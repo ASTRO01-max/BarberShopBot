@@ -1,3 +1,4 @@
+#keyboards/start_btns.py
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 start_button = InlineKeyboardMarkup(

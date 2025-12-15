@@ -55,7 +55,7 @@ async def save_order(order: dict):
     """
     async with async_session() as session:
         try:
-            # ---- Normalizatsiya ----
+            # --- Normalizatsiya ---
             raw_uid = order.get("user_id")
             if raw_uid is None:
                 raise ValueError("user_id is required")

@@ -27,7 +27,7 @@ async def get_orders_page(page: int):
             total_orders = await session.scalar(select(func.count(Order.id)))
             total_orders = int(total_orders or 0)
     except Exception as e:
-        # Log yoki print — developmentda ko'rish uchun
+        # Log yoki print — developmentda ko'rish
         print("get_orders_page DB error:", repr(e))
         return "❗ Navbatlar olishda xatolik yuz berdi.", None, 0
 
@@ -58,7 +58,7 @@ async def get_orders_page(page: int):
             f"🗓 <b>Navbat olingan vaqt:</b> {order_booked_time}\n\n"
         )
 
-    # Tugmalarni tayyorlash — har birini alohida qatorda qo'yamiz
+    # Tugmalarni tayyorlash — har birini alohida qatorda qo'yiladi
     rows = []
     nav_buttons = []
 

@@ -1,3 +1,4 @@
+#keyboards/main_menu.py
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 def get_main_menu():

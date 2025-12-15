@@ -1,3 +1,4 @@
+#handlers/start.py
 from aiogram import Router, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -26,7 +27,8 @@ def normalize_fancy(text: str) -> str:
 
 # --- 1. /start → video + tugma chiqarish ---
 @router.message(CommandStart())
-async def start_message(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
 
     video_id = "BAACAgIAAxkBAAIVxmkxXVuPN86bVFGK6AyeHgYjG8uuAALwigACDqCISf-pQ9Z1AlDhNgQ"
 
@@ -44,21 +46,12 @@ async def start_message(message: types.Message):
 # --- 2. Boshlash tugmasi bosilganda → userni ro‘yxatga olish ---
 @router.callback_query(lambda c: c.data == "start_bot")
 async def start_bot_pressed(callback: types.CallbackQuery, state: FSMContext):
-    await register_user(callback.message, state)
-    await callback.answer("🚀 Bot ishga tushdi ✅")
+    message = callback.message
+    tg_id = callback.from_user.id
 
-
-# --- 3. Ro‘yxatga olish va menyu chiqarish ---
-async def register_user(message: types.Message, state: FSMContext):
-    """Foydalanuvchini birinchi marta start bosganda bazaga yozadi va menyuni ko‘rsatadi."""
-    tg_id = message.from_user.id
-
-    first_name_raw = message.from_user.first_name
-    last_name_raw = message.from_user.last_name
-    username = message.from_user.username
-
-    first_name = normalize_fancy(first_name_raw)
-    last_name = normalize_fancy(last_name_raw)
+    first_name = normalize_fancy(callback.from_user.first_name)
+    last_name = normalize_fancy(callback.from_user.last_name)
+    username = callback.from_user.username
 
     async with async_session() as session:
         result = await session.execute(
@@ -67,13 +60,14 @@ async def register_user(message: types.Message, state: FSMContext):
         user = result.scalars().first()
 
         if not user:
-            new_user = OrdinaryUser(
-                tg_id=tg_id,
-                first_name=first_name,
-                last_name=last_name,
-                username=username
+            session.add(
+                OrdinaryUser(
+                    tg_id=tg_id,
+                    first_name=first_name,
+                    last_name=last_name,
+                    username=username
+                )
             )
-            session.add(new_user)
             await session.commit()
 
     await state.clear()
@@ -89,3 +83,7 @@ async def register_user(message: types.Message, state: FSMContext):
         "🏠 Asosiy menyu:",
         reply_markup=get_main_menu()
     )
+
+    await callback.answer("🚀 Bot ishga tushdi")
+
+ 

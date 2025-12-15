@@ -1,3 +1,4 @@
+#admins/service_shutdown.py
 from aiogram import Router, types, F
 from sqlalchemy import select
 from sql.db import async_session

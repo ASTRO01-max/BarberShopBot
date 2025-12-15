@@ -11,7 +11,7 @@ from sql.models import Barbers, OrdinaryUser
 router = Router()
 
 
-# --------------------------- 1) START ----------------------------
+# 1) START 
 @router.message(F.text == "💈 Barber qo'shish")
 async def add_barber_start(message: types.Message, state: FSMContext):
     await state.clear()

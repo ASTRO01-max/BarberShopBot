@@ -50,7 +50,7 @@ class Admins(Base):
     admin_fullname = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
 
-
+#Barberlar
 class Barbers(Base):
     __tablename__ = "barbers"
 
@@ -65,7 +65,7 @@ class Barbers(Base):
     photo = Column(String(300), nullable=True)
 
 
-
+#Xizmatlar
 class Services(Base):
     __tablename__ = "services"
 
@@ -74,7 +74,7 @@ class Services(Base):
     price = Column(Integer, nullable=False)
     duration = Column(String(50), nullable=False)
 
-
+#Super Adminlar
 class SuperAdmins(Base):
     __tablename__ = "superadmins"
 
