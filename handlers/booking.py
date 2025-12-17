@@ -1,49 +1,97 @@
 #handlers/booking.py
 import logging
+from datetime import datetime
+
 from aiogram import types, F, Router
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from aiogram.fsm.context import FSMContext
+
 from keyboards import booking_keyboards
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
 from sql.db_order_utils import save_order
+from sql.db_users_utils import get_user
+from sql.db_barbers import get_barbers
+
 from utils.states import UserState
-from utils.validators import parse_user_date, validate_phone, parse_int_safe
-from sql.db_users_utils import get_user, save_user
-from datetime import datetime
+from utils.validators import parse_user_date
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 
 # --- 1-qadam: Boshlash ---
-async def start_booking(callback: types.CallbackQuery, state: FSMContext):
-    """Agar foydalanuvchi bazada bo‘lsa → xizmat tanlash bosqichiga o‘tadi, aks holda ism so‘raladi."""
+async def start_booking(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user = await get_user(user_id)
 
     if user:
-        # ✅ Bazada mavjud foydalanuvchi → xizmat tanlashga o‘tadi
-        await callback.message.edit_text(
-            "💈 Xizmat turini tanlang:",
-            reply_markup=await booking_keyboards.service_keyboard()
-        )
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption="💈 Xizmat turini tanlang:",
+                reply_markup=await booking_keyboards.service_keyboard()
+            )
+        else:
+            await callback.message.edit_text(
+                "💈 Xizmat turini tanlang:",
+                reply_markup=await booking_keyboards.service_keyboard()
+            )
+
         await state.set_state(UserState.waiting_for_service)
+
     else:
-        # 🆕 Yangi foydalanuvchi → ism so‘raladi
-        await callback.message.edit_text(
-            "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
-        )
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption="Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+            )
+        else:
+            await callback.message.edit_text(
+                "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+            )
+
         await state.set_state(UserState.waiting_for_fullname)
 
     await callback.answer("Navbat olish boshlandi ✅")
 
 
-# --- 2-qadam: Foydalanuvchi ism kiritadi ---
+# --- Barber orqali boshlash ---
+async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
+    barber_id = callback.data.split("_")[2]
+    user_id = callback.from_user.id
+
+    await state.update_data(barber_id=barber_id)
+
+    text = "💈 Xizmat turini tanlang:"
+    keyboard = await booking_keyboards.service_keyboard()
+
+    if callback.message.photo:
+        await callback.message.edit_caption(
+            caption=text,
+            reply_markup=keyboard
+        )
+    else:
+        await callback.message.edit_text(
+            text,
+            reply_markup=keyboard
+        )
+
+    await state.set_state(UserState.waiting_for_service)
+    await callback.answer("🧑‍🎤 Barber tanlandi, navbat boshlandi ✅")
+
+
+# --- 2-qadam: Ism ---
 async def process_fullname(message: Message, state: FSMContext):
     fullname = message.text.strip()
+
     if len(fullname.split()) < 2:
-        await message.answer("❗ Iltimos, ism va familiyani to‘liq kiriting (masalan: Aliyev Valijon).")
+        await message.answer(
+            "❗ Iltimos, ism va familiyani to‘liq kiriting (masalan: Aliyev Valijon)."
+        )
         return
 
     await state.update_data(fullname=fullname)
@@ -52,66 +100,110 @@ async def process_fullname(message: Message, state: FSMContext):
         "📱 Iltimos, telefon raqamingizni kiriting yoki tugma orqali yuboring:",
         reply_markup=phone_request_keyboard
     )
+
     await state.set_state(UserState.waiting_for_phonenumber)
 
 
-# --- 3-qadam: Telefon raqami ---
+# --- 3-qadam: Telefon ---
 async def process_phonenumber(message: Message, state: FSMContext):
-    """Telefon raqamini tekshirish, saqlash va keyingi bosqichga o‘tish."""
     phonenumber = None
+
     if message.contact and message.contact.phone_number:
         phonenumber = message.contact.phone_number
     elif message.text:
         phonenumber = message.text.strip()
 
-    # ✅ Validatsiya
     if not phonenumber or not phonenumber.startswith("+998") or len(phonenumber) != 13:
-        await message.answer("❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567).")
+        await message.answer(
+            "❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567)."
+        )
         return
 
-    # ✅ Ma’lumotni state ichiga saqlaymiz
-    user_data = await state.get_data()
-    fullname = user_data.get("fullname", message.from_user.full_name or "Ism kiritilmagan")
+    data = await state.get_data()
+    fullname = data.get("fullname") or message.from_user.full_name or "Ism kiritilmagan"
 
-    await state.update_data(fullname=fullname, phonenumber=phonenumber)
+    await state.update_data(
+        fullname=fullname,
+        phonenumber=phonenumber
+    )
 
-    # ✅ Keyingi bosqich
-    await message.answer("📱 Raqamingiz qabul qilindi ✅", reply_markup=await get_dynamic_main_keyboard(message.from_user.id))
-    await message.answer("💈 Endi xizmat turini tanlang:", reply_markup=await booking_keyboards.service_keyboard())
+    await message.answer(
+        "📱 Raqamingiz qabul qilindi ✅",
+        reply_markup=await get_dynamic_main_keyboard(message.from_user.id)
+    )
+
+    await message.answer(
+        "💈 Endi xizmat turini tanlang:",
+        reply_markup=await booking_keyboards.service_keyboard()
+    )
+
     await state.set_state(UserState.waiting_for_service)
 
 
-# --- 4-qadam: Xizmat tanlash ---
+# --- 4-qadam: Xizmat ---
 async def book_step1(callback: CallbackQuery, state: FSMContext):
     service_id = callback.data.split("_")[1]
+    data = await state.get_data()
+
     await state.update_data(service_id=service_id)
-    await callback.message.edit_text(
-        "💈Barberni tanlang:",
-        reply_markup=await booking_keyboards.barber_keyboard(service_id)
-    )
-    await state.set_state(UserState.waiting_for_barber)
-    await callback.answer("👤 Ism va raqam qabul qilindi ✅")
 
+    if "barber_id" in data:
+        barber_id = data["barber_id"]
 
-# --- 5-qadam: Usta tanlash ---
-async def book_step2(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    if len(parts) < 3:
-        await callback.answer("⚠️ Ma’lumot formati noto‘g‘ri. Iltimos, qayta tanlang.", show_alert=True)
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption="📅 Sana tanlang:",
+                reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+            )
+        else:
+            await callback.message.edit_text(
+                "📅 Sana tanlang:",
+                reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+            )
+
+        await state.set_state(UserState.waiting_for_date)
+        await callback.answer("🧑‍🎤 Barber avtomatik tanlandi ✅")
         return
 
-    _, service_id, barber_id = parts[:3]
-    await state.update_data(service_id=service_id, barber_id=barber_id)
+    if callback.message.photo:
+        await callback.message.edit_caption(
+            caption="💈 Barberni tanlang:",
+            reply_markup=await booking_keyboards.barber_keyboard(service_id)
+        )
+    else:
+        await callback.message.edit_text(
+            "💈 Barberni tanlang:",
+            reply_markup=await booking_keyboards.barber_keyboard(service_id)
+        )
 
-    await callback.message.edit_text(
-        "📅 Sana tanlang:",
-        reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+    await state.set_state(UserState.waiting_for_barber)
+
+
+# --- 5-qadam: Barber ---
+async def book_step2(callback: CallbackQuery, state: FSMContext):
+    _, service_id, barber_id = callback.data.split("_")[:3]
+
+    await state.update_data(
+        service_id=service_id,
+        barber_id=barber_id
     )
+
+    if callback.message.photo:
+        await callback.message.edit_caption(
+            caption="📅 Sana tanlang:",
+            reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+        )
+    else:
+        await callback.message.edit_text(
+            "📅 Sana tanlang:",
+            reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+        )
+
     await state.set_state(UserState.waiting_for_date)
-    await callback.answer("🧑‍🎤 Usta tanlandi ✅")
+    await callback.answer("💈 Barber tanlandi ✅")
 
 
-# --- 6-qadam: Sana tanlash ---
+# --- 6-qadam: Sana (callback) ---
 async def book_step3(callback: CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date = callback.data.split("_")
     await state.update_data(date=date)
@@ -120,158 +212,188 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
 
     if keyboard is None:
         back_markup = InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="🔙 Orqaga",
-                    callback_data=f"back_date_{service_id}_{barber_id}"
-                )
-            ]]
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔙 Orqaga",
+                        callback_data=f"back_date_{service_id}_{barber_id}"
+                    )
+                ]
+            ]
         )
-        await callback.message.edit_text(
-            "❌ Kechirasiz, bu kunga barcha vaqtlar band.",
-            reply_markup=back_markup
-        )
+
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption="❌ Kechirasiz, bu kunga barcha vaqtlar band.",
+                reply_markup=back_markup
+            )
+        else:
+            await callback.message.edit_text(
+                "❌ Kechirasiz, bu kunga barcha vaqtlar band.",
+                reply_markup=back_markup
+            )
     else:
-        await callback.message.edit_text("⏰ Vaqt tanlang:", reply_markup=keyboard)
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption="⏰ Vaqt tanlang:",
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(
+                "⏰ Vaqt tanlang:",
+                reply_markup=keyboard
+            )
 
     await state.set_state(UserState.waiting_for_time)
     await callback.answer("📅 Sana qabul qilindi ✅")
 
 
-# --- 6-qadam: Sana (matn ko‘rinishida) ---
+# --- Sana (matn) ---
 @router.message(UserState.waiting_for_date)
 async def book_step3_message(message: Message, state: FSMContext):
-    user_text = message.text.strip()
-
-    from utils.validators import parse_user_date
-    date = parse_user_date(user_text)
+    date = parse_user_date(message.text.strip())
 
     if not date:
         await message.answer(
-            "❌ Kechirasiz, biz faqat joriy oy ichidagi sanalarni qabul qilamiz.\n"
-            "Iltimos, shu oydagi amal qiladigan sanani kiriting."
+            "❌ Kechirasiz, biz faqat joriy oy ichidagi sanalarni qabul qilamiz."
         )
-
         return
 
     await state.update_data(date=date)
 
-    user_data = await state.get_data()
-    service_id = user_data.get("service_id")
-    barber_id = user_data.get("barber_id")
-
-    from keyboards import booking_keyboards
-    keyboard = await booking_keyboards.time_keyboard(service_id, barber_id, date)
+    data = await state.get_data()
+    keyboard = await booking_keyboards.time_keyboard(
+        data["service_id"],
+        data["barber_id"],
+        date
+    )
 
     if keyboard is None:
-        await message.answer("❌ Bu kunda bo‘sh vaqt yo‘q. Boshqa sana kiriting.")
+        await message.answer("❌ Bu kunda bo‘sh vaqt yo‘q.")
         return
 
     await message.answer("⏰ Vaqtni tanlang:", reply_markup=keyboard)
     await state.set_state(UserState.waiting_for_time)
 
 
-# --- Orqaga qaytish ---
+# --- Orqaga ---
 async def back_to_date(callback: CallbackQuery, state: FSMContext):
     _, _, service_id, barber_id = callback.data.split("_")
-    await callback.message.edit_text(
-        "📅 Sana tanlang:",
-        reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
-    )
-    await state.set_state(UserState.waiting_for_date)
-    await callback.answer("📅 Sana qabul qilindi ✅")
 
-# ✅ Tasdiqlash bosqichi
+    if callback.message.photo:
+        await callback.message.edit_caption(
+            caption="📅 Sana tanlang:",
+            reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
+        )
+    else:
+        await callback.message.edit_text(
+            "📅 Sana tanlang:",
+            reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
+        )
+
+    await state.set_state(UserState.waiting_for_date)
+    await callback.answer("🔙 Orqaga qaytildi")
+
+
+# --- Tasdiqlash ---
 @router.callback_query(F.data.startswith("confirm_"))
 async def confirm(callback: types.CallbackQuery, state: FSMContext):
-    """Buyurtmani yakuniy tasdiqlash — foydalanuvchidan to‘plangan barcha ma’lumotlarni DB ga saqlaydi."""
-    data = callback.data or ""
-    if not data.startswith("confirm_"):
-        await callback.answer()
-        return
-
-    parts = data.split("_", 4)
-    if len(parts) != 5:
-        await callback.message.answer("⚠️ So'rov formati noto‘g‘ri. Iltimos, menyudan qayta tanlang.")
-        await callback.answer()
-        return
-
-    _, service_id, barber_id, date_str, time_str = parts
+    data = callback.data
+    _, service_id, barber_id, date_str, time_str = data.split("_", 4)
     user_id = callback.from_user.id
 
-    # 1️⃣ State’dagi ma’lumotlar
-    user_state = await state.get_data()
-    fullname = user_state.get("fullname")
-    phone = user_state.get("phonenumber") or user_state.get("phone")
+    # ===============================
+    # 1️⃣ UI: bosilgan vaqt tugmasini olib tashlash
+    # ===============================
+    markup = callback.message.reply_markup
+    if markup and markup.inline_keyboard:
+        new_keyboard = [
+            [btn for btn in row if btn.callback_data != data]
+            for row in markup.inline_keyboard
+            if any(btn.callback_data != data for btn in row)
+        ]
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+        )
 
-    # 2️⃣ Agar state bo‘sh bo‘lsa — DB'dan olish
+    # ===============================
+    # 2️⃣ DB: vaqt band emasligini tekshirish
+    # ===============================
+    from sql.db_order_utils import get_booked_times
+
+    booked_times = await get_booked_times(barber_id, date_str)
+    if time_str in booked_times:
+        await callback.answer(
+            "⛔ Ushbu vaqt hozirgina band bo‘ldi.\nBoshqa vaqt tanlang.",
+            show_alert=True
+        )
+        return
+
+    # ===============================
+    # 3️⃣ Foydalanuvchi ma’lumotlari
+    # ===============================
+    user_data = await state.get_data()
+    fullname = user_data.get("fullname")
+    phone = user_data.get("phonenumber")
+
     if not fullname or not phone:
-        try:
-            user = await get_user(user_id)
-            if user:
-                fullname = fullname or getattr(user, "fullname", None)
-                phone = phone or getattr(user, "phone", None)
-        except Exception as e:
-            logger.exception("get_user xatoligi: %s", e)
+        user = await get_user(user_id)
+        if user:
+            fullname = fullname or user.fullname
+            phone = phone or user.phone
 
     fullname = fullname or "Noma'lum"
     phone = phone or "Noma'lum"
 
-    # 3️⃣ Sana va vaqtni formatlash
-    try:
-        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-    except Exception:
-        date_obj = date_str
-
-    try:
-        time_obj = datetime.strptime(time_str, "%H:%M").time()
-    except Exception:
-        time_obj = time_str
-
-    # 4️⃣ Buyurtma ma’lumotlarini tayyorlash
+    # ===============================
+    # 4️⃣ Buyurtmani DB ga saqlash
+    # ===============================
     order = {
         "user_id": user_id,
         "fullname": fullname,
         "phonenumber": phone,
         "service_id": service_id,
         "barber_id": barber_id,
-        "date": date_obj,
-        "time": time_obj,
+        "date": date_str,
+        "time": time_str,
     }
 
-    # 5️⃣ DB'ga saqlash
-    try:
-        await save_order(order)
-    except Exception as e:
-        logger.exception("DB save error: %s", e)
-        await callback.message.answer(
-            "❌ Buyurtmangizni saqlashda xato yuz berdi. Iltimos, keyinroq urinib ko‘ring."
-        )
-        await callback.answer()
-        return
+    await save_order(order)
 
-    # 6️⃣ Foydalanuvchiga natijani ko‘rsatish
-    await callback.message.edit_text(
-        f"✅ <b>Buyurtmangiz muvaffaqiyatli saqlandi!</b>\n\n"
+    # ===============================
+    # 5️⃣ Natijani foydalanuvchiga ko‘rsatish
+    # ===============================
+    text = (
+        "✅ <b>Buyurtmangiz muvaffaqiyatli saqlandi!</b>\n\n"
         f"👤 <b>Ism:</b> {fullname}\n"
         f"📱 <b>Telefon:</b> {phone}\n"
         f"💈 <b>Xizmat:</b> {service_id}\n"
         f"👨‍💼 <b>Usta:</b> {barber_id}\n"
         f"📅 <b>Sana:</b> {date_str}\n"
-        f"🕔 <b>Vaqt:</b> {time_str}",
-        parse_mode="HTML"
+        f"🕔 <b>Vaqt:</b> {time_str}"
     )
+
+    # 🔑 MUHIM JOY
+    if callback.message.photo:
+        await callback.message.edit_caption(
+            caption=text,
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML"
+        )
 
     await state.clear()
+    await callback.answer("✅ Navbat olindi")
 
-    # 🟩 Shu joyda — ekranning o‘rtasida “✅ Tasdiqlandi” chiqadi va yo‘qoladi
-    await callback.answer("✅ Navbat olindi", show_alert=False)
-
-    # 🎉 Yakuniy xabar (chatga yuboriladi)
     await callback.message.answer(
-        "🎉 <b>Rahmat!</b> Sizning buyurtmangiz qabul qilindi.\n"
-        "Usta siz bilan belgilangan vaqtda bog‘lanadi.\n\n"
-        "🏠 Asosiy menyuga qaytish uchun pastdagi tugmadan foydalaning:",
-        parse_mode="HTML",
+        "🏠 Asosiy menyu:",
         reply_markup=get_main_menu()
     )
+
+
+
+
+

@@ -65,6 +65,19 @@ dp.callback_query.register(
     lambda c: c.data == "contact"
 )
 
+
+dp.callback_query.register(
+    booking.start_booking_from_barber,
+    lambda c: c.data.startswith("book_barber_")
+)
+
+
+dp.callback_query.register(
+    booking.start_booking,
+    lambda c: c.data == "book"
+)
+
+
 # Buyurtma boshlash
 dp.callback_query.register(
     booking.start_booking,

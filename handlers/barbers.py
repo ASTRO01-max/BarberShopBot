@@ -8,7 +8,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 # Pagination tugmalari
-def barber_nav_keyboard(index: int, total: int):
+def barber_nav_keyboard(index: int, total: int, barber_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -16,13 +16,17 @@ def barber_nav_keyboard(index: int, total: int):
                 InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"barber_next_{index}")
             ],
             [
-                InlineKeyboardButton(text="🗓️ Navbat olish", callback_data="book")
+                InlineKeyboardButton(
+                    text="🗓️ Navbat olish",
+                    callback_data=f"book_barber_{barber_id}"
+                )
             ],
             [
                 InlineKeyboardButton(text="🔙 Orqaga", callback_data="back")
             ],
         ]
     )
+
 
 
 # Bitta barberni chiqarish
@@ -37,7 +41,7 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
         f"📌 <i>({index + 1} / {len(barbers)})</i>"
     )
 
-    kb = barber_nav_keyboard(index, len(barbers))
+    kb = barber_nav_keyboard(index, len(barbers), barber.id)
 
     # Rasm bor
     if barber.photo:
