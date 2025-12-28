@@ -1,10 +1,13 @@
-#handlers/barbers.py
-from aiogram import types
+# handlers/barbers.py
+from aiogram import Router, types
 from sqlalchemy.future import select
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 from sql.db import async_session
 from sql.models import Barbers
 from keyboards.booking_keyboards import back_button
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+router = Router()
 
 
 # Pagination tugmalari
@@ -12,8 +15,14 @@ def barber_nav_keyboard(index: int, total: int, barber_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"barber_prev_{index}"),
-                InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"barber_next_{index}")
+                InlineKeyboardButton(
+                    text="⬅️ Oldingi",
+                    callback_data=f"barber_prev_{index}"
+                ),
+                InlineKeyboardButton(
+                    text="➡️ Keyingi",
+                    callback_data=f"barber_next_{index}"
+                ),
             ],
             [
                 InlineKeyboardButton(
@@ -22,11 +31,13 @@ def barber_nav_keyboard(index: int, total: int, barber_id: int):
                 )
             ],
             [
-                InlineKeyboardButton(text="🔙 Orqaga", callback_data="back")
+                InlineKeyboardButton(
+                    text="🔙 Orqaga",
+                    callback_data="back"
+                )
             ],
         ]
     )
-
 
 
 # Bitta barberni chiqarish
@@ -41,45 +52,59 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
         f"📌 <i>({index + 1} / {len(barbers)})</i>"
     )
 
-    kb = barber_nav_keyboard(index, len(barbers), barber.id)
+    keyboard = barber_nav_keyboard(index, len(barbers), barber.id)
 
-    # Rasm bor
     if barber.photo:
         try:
             await callback.message.edit_media(
-                types.InputMediaPhoto(media=barber.photo, caption=caption, parse_mode="HTML"),
-                reply_markup=kb
+                types.InputMediaPhoto(
+                    media=barber.photo,
+                    caption=caption,
+                    parse_mode="HTML"
+                ),
+                reply_markup=keyboard
             )
         except:
             await callback.message.delete()
             await callback.message.answer_photo(
                 photo=barber.photo,
                 caption=caption,
-                reply_markup=kb,
+                reply_markup=keyboard,
                 parse_mode="HTML"
             )
     else:
-        # Rasm yo‘q bo‘lsa
         try:
-            await callback.message.edit_text(caption, reply_markup=kb, parse_mode="HTML")
+            await callback.message.edit_text(
+                caption,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
         except:
             await callback.message.delete()
-            await callback.message.answer(caption, reply_markup=kb, parse_mode="HTML")
+            await callback.message.answer(
+                caption,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
 
 
-# Boshlanish
+# Barberlar ro‘yxati
 async def show_barbers(callback: types.CallbackQuery):
     async with async_session() as session:
         result = await session.execute(select(Barbers))
         barbers = result.scalars().all()
 
     if not barbers:
-        return await callback.message.edit_text("⚠️ Ustalar mavjud emas.", reply_markup=back_button())
+        await callback.message.edit_text(
+            "⚠️ Ustalar mavjud emas.",
+            reply_markup=back_button()
+        )
+        return
 
     await send_barber(callback, barbers, 0)
 
 
-# Next / Prev boshqaruv
+# Next / Prev
 async def navigate_barbers(callback: types.CallbackQuery):
     action, index = callback.data.split("_")[1], int(callback.data.split("_")[2])
 

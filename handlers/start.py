@@ -30,7 +30,7 @@ def normalize_fancy(text: str) -> str:
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
 
-    video_id = "BAACAgIAAxkBAAIVxmkxXVuPN86bVFGK6AyeHgYjG8uuAALwigACDqCISf-pQ9Z1AlDhNgQ"
+    video_id = "BAACAgIAAxkBAAMHaUtvuBLcaxS54Lhvt4xwqBMLQ2QAAq2JAAIPe2BKpIl-BG9XL-c2BA"
 
     await message.answer_video(
         video=video_id,

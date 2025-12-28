@@ -5,7 +5,7 @@ from config import BOT_TOKEN
 from utils.logger import setup_logger
 from admins import router as admins_router
 from sql.db import init_db
-
+# from utils.get_file_id import router as fileid_router
 from handlers import (
     start,
     services,
@@ -25,6 +25,11 @@ dp = Dispatcher()
 #     start.start_handler,
 #     CommandStart()
 # )
+
+
+"""startda chiqarish kerak bo'lgan video yuborilganda
+uni file_id to'kenini yuborib beradigan kod"""
+# dp.include_router(fileid_router)
 
 dp.include_router(start.router)
 

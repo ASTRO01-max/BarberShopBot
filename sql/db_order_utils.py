@@ -119,6 +119,7 @@ async def get_booked_times(barber_id: str, date_str: str):
             )
         )
         times = result.scalars().all()
+        print(times)
         return [t.strftime("%H:%M") for t in times]
 
 

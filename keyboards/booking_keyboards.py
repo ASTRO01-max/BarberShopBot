@@ -6,7 +6,7 @@ from sqlalchemy.future import select
 from sql.db import async_session
 from sql.models import Services, Barbers
 from utils.emoji_map import SERVICE_EMOJIS
-
+from sql.db_order_utils import get_booked_times
 
 def back_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -63,7 +63,7 @@ async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
             for b in barbers:
                 builder.button(
                     text=f"{b.barber_first_name} {b.barber_last_name or ''}",
-                    callback_data=f"barber_{service_id}_{b.barber_first_name}"   # ← Siz xohlagan format
+                    callback_data=f"barber_{service_id}_{b.id}"   # ← Siz xohlagan format
                 )
 
         builder.adjust(1)
@@ -75,23 +75,41 @@ async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
         return builder.as_markup()
 
 
-def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup:
+async def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup:
+    from sql.db_order_utils import get_booked_times
+
     now = datetime.now()
     builder = InlineKeyboardBuilder()
 
+    ALL_TIMES = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
+
     for i in range(7):
         current_day = now + timedelta(days=i)
+        date_str = current_day.strftime("%Y-%m-%d")
+
+        booked = await get_booked_times(barber_id, date_str)
+        available = [t for t in ALL_TIMES if t not in booked]
+
+        # ❌ AGAR VAQT YO‘Q → SANANI HAM CHIQARMAYMIZ
+        if not available:
+            continue
 
         day = current_day.day
         month = MONTHS[current_day.month - 1]
         weekday = WEEKDAYS[current_day.weekday()]
-
         text = f"{day}-{month} {weekday}"
 
-        # <<<< ASOSIY TUZATISH >>>>
-        callback = f"date_{service_id}_{barber_id}_{current_day.strftime('%Y-%m-%d')}"
+        builder.button(
+            text=text,
+            callback_data=f"date_{service_id}_{barber_id}_{date_str}"
+        )
 
-        builder.button(text=text, callback_data=callback)
+    if not builder.buttons:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Bo‘sh sana yo‘q", callback_data="no_dates")]
+            ]
+        )
 
     builder.adjust(1)
     return builder.as_markup()

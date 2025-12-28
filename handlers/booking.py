@@ -1,7 +1,6 @@
 #handlers/booking.py
 import logging
 from datetime import datetime
-
 from aiogram import types, F, Router
 from aiogram.types import (
     Message,
@@ -10,14 +9,12 @@ from aiogram.types import (
     InlineKeyboardMarkup,
 )
 from aiogram.fsm.context import FSMContext
-
 from keyboards import booking_keyboards
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
-from sql.db_order_utils import save_order
 from sql.db_users_utils import get_user
 from sql.db_barbers import get_barbers
-
+from sql.db_order_utils import get_booked_times, save_order
 from utils.states import UserState
 from utils.validators import parse_user_date
 
@@ -153,12 +150,12 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
         if callback.message.photo:
             await callback.message.edit_caption(
                 caption="📅 Sana tanlang:",
-                reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+                reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
             )
         else:
             await callback.message.edit_text(
                 "📅 Sana tanlang:",
-                reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+                reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
             )
 
         await state.set_state(UserState.waiting_for_date)
@@ -181,8 +178,8 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
 # --- 5-qadam: Barber ---
 async def book_step2(callback: CallbackQuery, state: FSMContext):
-    _, service_id, barber_id = callback.data.split("_")[:3]
-
+    _, service_id = callback.data.split("_")[:3]
+    _, barber_id = int(callback.data.split("_")[1])
     await state.update_data(
         service_id=service_id,
         barber_id=barber_id
@@ -191,12 +188,12 @@ async def book_step2(callback: CallbackQuery, state: FSMContext):
     if callback.message.photo:
         await callback.message.edit_caption(
             caption="📅 Sana tanlang:",
-            reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+            reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
         )
     else:
         await callback.message.edit_text(
             "📅 Sana tanlang:",
-            reply_markup=booking_keyboards.date_keyboard(service_id, barber_id)
+            reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
         )
 
     await state.set_state(UserState.waiting_for_date)
@@ -302,9 +299,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date_str, time_str = data.split("_", 4)
     user_id = callback.from_user.id
 
-    # ===============================
     # 1️⃣ UI: bosilgan vaqt tugmasini olib tashlash
-    # ===============================
     markup = callback.message.reply_markup
     if markup and markup.inline_keyboard:
         new_keyboard = [
@@ -316,11 +311,6 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard)
         )
 
-    # ===============================
-    # 2️⃣ DB: vaqt band emasligini tekshirish
-    # ===============================
-    from sql.db_order_utils import get_booked_times
-
     booked_times = await get_booked_times(barber_id, date_str)
     if time_str in booked_times:
         await callback.answer(
@@ -329,9 +319,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         )
         return
 
-    # ===============================
     # 3️⃣ Foydalanuvchi ma’lumotlari
-    # ===============================
     user_data = await state.get_data()
     fullname = user_data.get("fullname")
     phone = user_data.get("phonenumber")
@@ -345,9 +333,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     fullname = fullname or "Noma'lum"
     phone = phone or "Noma'lum"
 
-    # ===============================
     # 4️⃣ Buyurtmani DB ga saqlash
-    # ===============================
     order = {
         "user_id": user_id,
         "fullname": fullname,
@@ -360,9 +346,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
 
     await save_order(order)
 
-    # ===============================
     # 5️⃣ Natijani foydalanuvchiga ko‘rsatish
-    # ===============================
     text = (
         "✅ <b>Buyurtmangiz muvaffaqiyatli saqlandi!</b>\n\n"
         f"👤 <b>Ism:</b> {fullname}\n"
@@ -392,8 +376,3 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         "🏠 Asosiy menyu:",
         reply_markup=get_main_menu()
     )
-
-
-
-
-
