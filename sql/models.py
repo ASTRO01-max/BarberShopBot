@@ -1,5 +1,5 @@
 # sql/models.py
-from sqlalchemy import Column, Integer, BigInteger, String, Date, Time
+from sqlalchemy import Column, Integer, BigInteger, String, Date, Time, Boolean, JSON
 from sqlalchemy import LargeBinary
 from sql.db import Base
 
@@ -63,6 +63,13 @@ class Barbers(Base):
     experience = Column(String(50), nullable=False)
     work_days = Column(String(50), nullable=False)
     photo = Column(String(300), nullable=True)
+
+    # YANGI ustunlar (ixtiyoriy):
+    work_time = Column(JSON, nullable=True)  # {"from": "09:00", "to": "18:00"}
+    is_paused = Column(Boolean, default=False)  # Bugun ishlamaslik holati
+    
+    def __repr__(self):
+        return f"<Barber {self.barber_first_name} {self.barber_last_name}>"
 
 
 #Xizmatlar

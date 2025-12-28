@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher
 from config import BOT_TOKEN
 from utils.logger import setup_logger
 from admins import router as admins_router
+from superadmins import router as barber_router
 from sql.db import init_db
 # from utils.get_file_id import router as fileid_router
 from handlers import (
@@ -35,6 +36,9 @@ dp.include_router(start.router)
 
 #ADMIN_PANEL
 dp.include_router(admins_router)
+
+#BARBER PANEL
+dp.include_router(barber_router)
 
 #SUPPORT_PANEL
 dp.include_router(support.router)
