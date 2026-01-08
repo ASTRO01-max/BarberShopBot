@@ -1,6 +1,6 @@
 # superadmins/pause_today.py
 from aiogram import Router, types, F
-from sqlalchemy import update, select, and_
+from sqlalchemy import update, select, and_, func  # ✅ func qo'shildi
 from datetime import date
 from sql.db import async_session
 from sql.models import Barbers, Order
@@ -32,8 +32,6 @@ async def ask_pause_confirmation(message: types.Message):
                 )
             )
         )
-    
-    from sqlalchemy import func
     
     text = (
         f"⚠️ <b>Diqqat!</b>\n\n"

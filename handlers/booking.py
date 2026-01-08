@@ -178,8 +178,7 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
 # --- 5-qadam: Barber ---
 async def book_step2(callback: CallbackQuery, state: FSMContext):
-    _, service_id = callback.data.split("_")[:3]
-    _, barber_id = int(callback.data.split("_")[1])
+    _, service_id, barber_id = callback.data.split("_")[:3]
     await state.update_data(
         service_id=service_id,
         barber_id=barber_id
