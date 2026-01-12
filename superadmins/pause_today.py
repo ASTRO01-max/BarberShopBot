@@ -5,12 +5,12 @@ from datetime import date
 from sql.db import async_session
 from sql.models import Barbers, Order
 from .superadmin import get_barber_by_tg_id
-from .superadmin_buttons import get_pause_confirm_keyboard, get_back_to_menu_keyboard
+from .superadmin_buttons import get_pause_confirm_keyboard
 
 router = Router()
 
 
-@router.message(F.text == "⏸ Bugun ishlamayman")
+@router.message(F.text == "⛔ Bugun ishlamayman")
 async def ask_pause_confirmation(message: types.Message):
     """Bugungi ishni to'xtatish tasdiqlanishi"""
     tg_id = message.from_user.id
@@ -21,27 +21,27 @@ async def ask_pause_confirmation(message: types.Message):
     
     # Bugungi buyurtmalar sonini tekshirish
     today = date.today()
-    barber_name = f"{barber.barber_first_name} {barber.barber_last_name or ''}"
+    barber_key = str(barber.id)
     
     async with async_session() as session:
         orders_count = await session.scalar(
             select(func.count(Order.id)).where(
                 and_(
-                    Order.barber_id == barber_name,
+                    Order.barber_id == barber_key,
                     Order.date == today
                 )
             )
         )
     
     text = (
-        f"⚠️ <b>Diqqat!</b>\n\n"
-        f"Bugungi ishni to'xtatmoqchimisiz?\n\n"
+        f"⚠️ <b>Diqqat</b>\n\n"
+        f"Bugungi ishni to'xtatmoqchimisiz?\n"
         f"📋 Bugungi buyurtmalar: <b>{orders_count or 0}</b>\n\n"
     )
     
     if orders_count and orders_count > 0:
         text += (
-            f"⚠️ <b>Eslatma:</b> Sizda bugungi {orders_count} ta buyurtma bor!\n"
+            f"⚠️ <b>Eslatma:</b> Sizda bugun {orders_count} ta buyurtma bor.\n"
             f"Ish to'xtatilsa, mijozlarga xabar yuboriladi.\n\n"
         )
     
@@ -65,14 +65,14 @@ async def confirm_pause_today(callback: types.CallbackQuery):
         return
     
     today = date.today()
-    barber_name = f"{barber.barber_first_name} {barber.barber_last_name or ''}"
+    barber_key = str(barber.id)
     
     # Bugungi buyurtmalarni olish
     async with async_session() as session:
         result = await session.execute(
             select(Order).where(
                 and_(
-                    Order.barber_id == barber_name,
+                    Order.barber_id == barber_key,
                     Order.date == today
                 )
             )
@@ -92,7 +92,7 @@ async def confirm_pause_today(callback: types.CallbackQuery):
                     f"ishlamasligi sababli, sizning bugungi ({order.time.strftime('%H:%M')}) "
                     f"navbatingiz bekor qilindi.\n\n"
                     f"Iltimos, boshqa kun yoki boshqa ustadan navbat oling.\n\n"
-                    f"Noqulaylik uchun uzr so'raymiz! 🙏"
+                    f"Noqulaylik uchun uzr so'raymiz. 🙏"
                 ),
                 parse_mode="HTML"
             )
@@ -107,12 +107,11 @@ async def confirm_pause_today(callback: types.CallbackQuery):
         await session.commit()
     
     await callback.message.edit_text(
-        f"✅ <b>Bugungi ish to'xtatildi!</b>\n\n"
+        f"✅ <b>Bugungi ish to'xtatildi</b>\n\n"
         f"📋 O'chirilgan buyurtmalar: <b>{len(orders)}</b>\n"
         f"📨 Xabarnoma yuborildi: <b>{notified}</b>\n\n"
         f"Ertaga yana faol bo'lishingiz mumkin.",
-        parse_mode="HTML",
-        reply_markup=get_back_to_menu_keyboard()
+        parse_mode="HTML"
     )
     
     await callback.answer("✅ Bugungi ish to'xtatildi")

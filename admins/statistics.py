@@ -66,7 +66,7 @@ async def send_overall_stats(target: Union[types.Message, types.Chat, types.Call
         f"📦 <b>Jami buyurtmalar:</b> {total_orders}\n"
         f"👥 <b>Foydalanuvchilar soni:</b> {total_users}\n"
         f"📅 <b>Bugungi buyurtmalar:</b> {today_orders}\n"
-        f"🙋‍♂️ <b>Bugungi foydalanuchilar:</b> {today_users}\n\n"
+        f"👤 <b>Bugungi foydalanuchilar:</b> {today_users}\n\n"
         f"💈 <b>Barberlar bo‘yicha statistika:</b>"
     )
 
@@ -106,13 +106,13 @@ async def barber_stats(callback: types.CallbackQuery):
             if not barber:
                 return await callback.answer("❌ Barber topilmadi!", show_alert=True)
 
-            # 🔥 Muammo shu joyda edi — endi fullname bo‘yicha solishtiramiz:
+            barber_id_str = str(barber.id)
             total_orders = await session.scalar(
-                select(func.count(Order.id)).where(Order.barber_id == barber.barber_first_name)
+                select(func.count(Order.id)).where(Order.barber_id == barber_id_str)
             )
             today_orders = await session.scalar(
                 select(func.count(Order.id)).where(
-                    and_(Order.barber_id == barber.barber_first_name, func.date(Order.booked_date) == today)
+                    and_(Order.barber_id == barber_id_str, Order.booked_date == today)
                 )
             )
     except SQLAlchemyError as e:

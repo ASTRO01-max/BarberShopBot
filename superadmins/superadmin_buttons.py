@@ -11,7 +11,7 @@ def get_barber_menu():
                 KeyboardButton(text="🗓 Ish jadvalim")
             ],
             [
-                KeyboardButton(text="⏸ Bugun ishlamayman"),
+                KeyboardButton(text="⛔ Bugun ishlamayman"),
                 KeyboardButton(text="✉️ Maxsus xabar")
             ],
             [
@@ -33,7 +33,7 @@ def get_schedule_keyboard():
                 InlineKeyboardButton(text="📅 Ish kunlarini o'zgartirish", callback_data="barber_change_days")
             ],
             [
-                InlineKeyboardButton(text="🔙 Orqaga", callback_data="barber_menu")
+                InlineKeyboardButton(text="⬅️ Orqaga", callback_data="barber_menu")
             ]
         ]
     )
@@ -59,7 +59,7 @@ def get_order_actions_keyboard(order_id: int, client_tg_id: int = None, phone: s
     
     # Ogohlantirish tugmasi (har doim)
     buttons.append([
-        InlineKeyboardButton(text="🔔 Ogohlantirish", callback_data=f"barber_notify_{order_id}")
+        InlineKeyboardButton(text="🔔 Eslatma yuborish", callback_data=f"barber_notify_{order_id}")
     ])
     
     # Telefon va chat tugmalari (agar mavjud bo'lsa)
@@ -78,16 +78,8 @@ def get_order_actions_keyboard(order_id: int, client_tg_id: int = None, phone: s
     
     # Buyurtmani yakunlash
     buttons.append([
-        InlineKeyboardButton(text="✅ Yakunlandi", callback_data=f"barber_complete_{order_id}")
+        InlineKeyboardButton(text="✅ Yakunlash", callback_data=f"barber_complete_{order_id}")
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-
-def get_back_to_menu_keyboard():
-    """Menyuga qaytish tugmasi"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Menyuga qaytish", callback_data="barber_menu")]
-        ]
-    )

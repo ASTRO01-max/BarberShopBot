@@ -4,13 +4,11 @@ from aiogram import F, types, Router
 from datetime import date
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-from datetime import datetime
 from sqlalchemy import select, and_
 from sql.db import async_session
-from sql.models import Order, Services
+from sql.models import Order, Services, Barbers
 from utils.states import UserState, UserForm
-from sql.db_order_utils import delete_last_order_by_user, load_orders
-from sql.db_users_utils import save_user, update_user, delete_user, get_user
+from sql.db_users_utils import save_user, delete_user
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyboard
 from utils.validators import validate_fullname, validate_phone
@@ -19,29 +17,99 @@ router = Router()
 USER_ORDERS_PER_PAGE = 5
 
 
-def get_user_orders_page(user_orders, page: int):
+def _to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _prepare_order_cards(orders):
+    if not orders:
+        return []
+
+    service_ids = {_to_int(o.service_id) for o in orders}
+    service_ids.discard(None)
+    barber_ids = {_to_int(o.barber_id) for o in orders}
+    barber_ids.discard(None)
+
+    services_by_id = {}
+    barbers_by_id = {}
+    async with async_session() as session:
+        if service_ids:
+            result = await session.execute(select(Services).where(Services.id.in_(service_ids)))
+            services_by_id = {s.id: s for s in result.scalars().all()}
+        if barber_ids:
+            result = await session.execute(select(Barbers).where(Barbers.id.in_(barber_ids)))
+            barbers_by_id = {b.id: b for b in result.scalars().all()}
+
+    order_cards = []
+    for o in orders:
+        service_id = _to_int(o.service_id)
+        service_name = (
+            services_by_id[service_id].name
+            if service_id is not None and service_id in services_by_id
+            else str(o.service_id)
+        )
+
+        barber_id = _to_int(o.barber_id)
+        if barber_id is not None and barber_id in barbers_by_id:
+            barber = barbers_by_id[barber_id]
+            barber_name = " ".join(
+                part for part in [barber.barber_first_name, barber.barber_last_name] if part
+            ).strip()
+            barber_name = barber_name or str(o.barber_id)
+        else:
+            barber_name = str(o.barber_id)
+
+        date_text = o.date.strftime("%Y-%m-%d") if hasattr(o.date, "strftime") else str(o.date)
+        time_text = o.time.strftime("%H:%M") if hasattr(o.time, "strftime") else str(o.time)
+
+        order_cards.append(
+            {
+                "date": date_text,
+                "time": time_text,
+                "barber": barber_name,
+                "service": service_name,
+            }
+        )
+
+    return order_cards
+
+
+async def _fetch_user_orders(user_id: int, only_today: bool = False):
+    async with async_session() as session:
+        query = select(Order).where(Order.user_id == user_id)
+        if only_today:
+            query = query.where(Order.booked_date == date.today())
+        query = query.order_by(Order.booked_date.desc(), Order.booked_time.desc(), Order.id.desc())
+        result = await session.execute(query)
+        return result.scalars().all()
+
+
+def get_user_orders_page(order_cards, page: int):
     """
     Foydalanuvchi buyurtmalarini sahifalab chiqarish
     """
     start = page * USER_ORDERS_PER_PAGE
     end = start + USER_ORDERS_PER_PAGE
-    sliced = user_orders[start:end]
+    sliced = order_cards[start:end]
 
     text = "📋 *Sizning barcha buyurtmalaringiz:*\n\n"
     for idx, o in enumerate(sliced, start=start + 1):
         text += (
             f"📌 *Buyurtma {idx}*\n"
-            f"📅 Sana: {o.date}\n"
-            f"⏰ Vaqt: {o.time}\n"
-            f"💈 Barber: {o.barber_id}\n"
-            f"✂️ Xizmat: {o.service_id}\n\n"
+            f"📅 Sana: {o['date']}\n"
+            f"⏰ Vaqt: {o['time']}\n"
+            f"💈 Barber: {o['barber']}\n"
+            f"✂️ Xizmat: {o['service']}\n\n"
         )
 
     # Tugmalar (pagination + qaytish)
     buttons = []
     if page > 0:
         buttons.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"user_prev:{page-1}"))
-    if end < len(user_orders):
+    if end < len(order_cards):
         buttons.append(InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"user_next:{page+1}"))
 
     nav_row = buttons if buttons else []
@@ -55,19 +123,13 @@ def get_user_orders_page(user_orders, page: int):
 @router.message(F.text == "🗂Buyurtmalar tarixi")
 async def show_user_orders(message: Message):
     user_id = message.from_user.id
-    orders = await load_orders()
-    user_orders = [o for o in orders if o.user_id == user_id]
-
-    if not user_orders:
-        await message.answer("🛒 Sizda hech qanday buyurtma topilmadi.")
-        return
-
-    today = datetime.now().date()
-    # 🔹 Faqat bugun joylashtirilgan buyurtmalarni olish (booked_date bo‘yicha)
-    todays_orders = [o for o in user_orders if getattr(o, "booked_date", None) == today]
-
-    # 🔸 Agar bugun buyurtma qilinmagan bo‘lsa
+    todays_orders = await _fetch_user_orders(user_id, only_today=True)
     if not todays_orders:
+        all_orders = await _fetch_user_orders(user_id, only_today=False)
+        if not all_orders:
+            await message.answer("🛒 Sizda hech qanday buyurtma topilmadi.")
+            return
+
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="📁 Barcha buyurtmalarni ko‘rish", callback_data="show_all_orders")]
@@ -76,13 +138,15 @@ async def show_user_orders(message: Message):
         await message.answer("❌ Siz bugun buyurtma qilmadingiz.", reply_markup=markup)
         return
 
+    order_cards = await _prepare_order_cards(todays_orders)
+
     # 🔸 Agar bugun joylashtirilgan buyurtmalar mavjud bo‘lsa
     response_lines = ["🗂 *Bugun joylashtirilgan buyurtmalaringiz:*\n"]
-    for idx, o in enumerate(todays_orders, start=1):
+    for idx, o in enumerate(order_cards, start=1):
         response_lines.append(
-            f"{idx}. 📅 {o.date}, ⏰ {o.time}\n"
-            f"   💈 Barber: {o.barber_id}\n"
-            f"   ✂️ Xizmat: {o.service_id}\n"
+            f"{idx}. 📅 {o['date']}, ⏰ {o['time']}\n"
+            f"   💈 Barber: {o['barber']}\n"
+            f"   ✂️ Xizmat: {o['service']}\n"
         )
 
     markup = InlineKeyboardMarkup(
@@ -98,18 +162,17 @@ async def show_user_orders(message: Message):
 @router.callback_query(F.data == "show_all_orders")
 async def show_all_orders(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    orders = await load_orders()
-    user_orders = [o for o in orders if o.user_id == user_id]
-
+    user_orders = await _fetch_user_orders(user_id)
     if not user_orders:
         await callback.message.edit_text("🛒 Sizda hech qanday buyurtma topilmadi.")
         await callback.answer()
         return
 
+    order_cards = await _prepare_order_cards(user_orders)
     page = 0
-    text, markup = get_user_orders_page(user_orders, page)
+    text, markup = get_user_orders_page(order_cards, page)
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
-    await state.update_data(user_orders=user_orders, current_page=page)
+    await state.update_data(order_cards=order_cards, current_page=page)
     await callback.answer()
 
 
@@ -117,13 +180,13 @@ async def show_all_orders(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith(("user_next", "user_prev")))
 async def paginate_user_orders(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    user_orders = data.get("user_orders", [])
-    if not user_orders:
+    order_cards = data.get("order_cards", [])
+    if not order_cards:
         await callback.answer("⚠️ Buyurtmalar topilmadi", show_alert=True)
         return
 
     page = int(callback.data.split(":")[1])
-    text, markup = get_user_orders_page(user_orders, page)
+    text, markup = get_user_orders_page(order_cards, page)
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
     await state.update_data(current_page=page)
     await callback.answer()
@@ -133,11 +196,7 @@ async def paginate_user_orders(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "back_to_today")
 async def back_to_today(callback: CallbackQuery):
     user_id = callback.from_user.id
-    orders = await load_orders()
-    user_orders = [o for o in orders if o.user_id == user_id]
-
-    today = datetime.now().date()
-    todays_orders = [o for o in user_orders if getattr(o, "booked_date", None) == today]
+    todays_orders = await _fetch_user_orders(user_id, only_today=True)
 
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -150,12 +209,14 @@ async def back_to_today(callback: CallbackQuery):
         await callback.answer()
         return
 
+    order_cards = await _prepare_order_cards(todays_orders)
+
     response_lines = ["🗂 *Bugun joylashtirilgan buyurtmalaringiz:*\n"]
-    for idx, o in enumerate(todays_orders, start=1):
+    for idx, o in enumerate(order_cards, start=1):
         response_lines.append(
-            f"{idx}. 📅 {o.date}, ⏰ {o.time}\n"
-            f"   💈 Barber: {o.barber_id}\n"
-            f"   ✂️ Xizmat: {o.service_id}\n"
+            f"{idx}. 📅 {o['date']}, ⏰ {o['time']}\n"
+            f"   💈 Barber: {o['barber']}\n"
+            f"   ✂️ Xizmat: {o['service']}\n"
         )
 
     await callback.message.edit_text("\n".join(response_lines), parse_mode="Markdown", reply_markup=markup)
@@ -191,30 +252,23 @@ async def show_todays_orders_for_cancel(message: types.Message):
         return
 
     # 🔹 Bugun joylagan barcha buyurtmalarni chiqarish
-    async with async_session() as session:
-        for order in orders:
-            # Xizmat nomini xavfsiz olish
-            service_name = str(order.service_id)
-            if isinstance(order.service_id, int):
-                service = await session.get(Services, order.service_id)
-                if service:
-                    service_name = service.service_name
+    order_cards = await _prepare_order_cards(orders)
+    for order, card in zip(orders, order_cards):
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="❌ Bekor qilish",
+                    callback_data=f"cancel_order:{order.id}"
+                )
+            ]]
+        )
 
-            markup = InlineKeyboardMarkup(
-                inline_keyboard=[[
-                    InlineKeyboardButton(
-                        text="❌ Bekor qilish",
-                        callback_data=f"cancel_order:{order.id}"
-                    )
-                ]]
-            )
-
-            await message.answer(
-                f"📅 Sana: {order.date}\n"
-                f"⏰ Vaqt: {order.time}\n"
-                f"✂️ Xizmat: {service_name}",
-                reply_markup=markup
-            )
+        await message.answer(
+            f"📅 Sana: {card['date']}\n"
+            f"⏰ Vaqt: {card['time']}\n"
+            f"✂️ Xizmat: {card['service']}",
+            reply_markup=markup
+        )
 
 
 # 🟢 Tugma bosilganda — buyurtmani bekor qilish

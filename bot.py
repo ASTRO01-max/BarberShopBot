@@ -6,6 +6,7 @@ from utils.logger import setup_logger
 from admins import router as admins_router
 from superadmins import router as barber_router
 from sql.db import init_db
+#kere bopqoldi
 # from utils.get_file_id import router as fileid_router
 from handlers import (
     start,
