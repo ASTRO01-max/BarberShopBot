@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.future import select
 from sqlalchemy import delete
 from .db import async_session
-from .models import Order
+from .models import Order, Barbers
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ async def save_order(order: dict):
       - phonenumber
       - service_id
       - barber_id
+      - barber_id_name (optional)
       - date (YYYY-MM-DD or datetime.date)
       - time (HH:MM or datetime.time)
     Returns created Order ORM instance.
@@ -64,7 +65,34 @@ async def save_order(order: dict):
             fullname = order.get("fullname") or "Noma'lum"
             phonenumber = order.get("phonenumber") or order.get("phone") or "Noma'lum"
             service_id = order.get("service_id") or order.get("service")
-            barber_id = order.get("barber_id") or order.get("barber")
+            if service_id is None:
+                raise ValueError("service_id is required")
+
+            barber_id_raw = order.get("barber_id") or order.get("barber")
+            if barber_id_raw is None:
+                raise ValueError("barber_id is required")
+            barber_id = str(barber_id_raw)
+
+            barber_id_name = (
+                order.get("barber_id_name")
+                or order.get("barber_name")
+                or order.get("barber_fullname")
+            )
+            if not barber_id_name:
+                try:
+                    barber_db_id = int(barber_id_raw)
+                except (TypeError, ValueError):
+                    barber_db_id = None
+
+                if barber_db_id is not None:
+                    barber = await session.get(Barbers, barber_db_id)
+                else:
+                    barber = None
+
+                if barber:
+                    barber_id_name = (barber.barber_first_name or "").strip() or barber_id
+                else:
+                    barber_id_name = barber_id
 
             date_val = _parse_date(order.get("date"))
             time_val = _parse_time(order.get("time"))
@@ -77,6 +105,7 @@ async def save_order(order: dict):
                 phonenumber=phonenumber,
                 service_id=service_id,
                 barber_id=barber_id,
+                barber_id_name=barber_id_name,
                 date=date_val,
                 time=time_val,
                 booked_date=now.date(),

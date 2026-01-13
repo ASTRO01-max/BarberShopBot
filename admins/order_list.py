@@ -46,15 +46,17 @@ async def _prepare_order_rows(orders):
             else str(order.service_id)
         )
 
-        barber_id = _to_int(order.barber_id)
-        if barber_id is not None and barber_id in barbers_by_id:
-            barber = barbers_by_id[barber_id]
-            barber_name = " ".join(
-                part for part in [barber.barber_first_name, barber.barber_last_name] if part
-            ).strip()
-            barber_name = barber_name or str(order.barber_id)
-        else:
-            barber_name = str(order.barber_id)
+        barber_name = (getattr(order, "barber_id_name", "") or "").strip()
+        if not barber_name:
+            barber_id = _to_int(order.barber_id)
+            if barber_id is not None and barber_id in barbers_by_id:
+                barber = barbers_by_id[barber_id]
+                barber_name = " ".join(
+                    part for part in [barber.barber_first_name, barber.barber_last_name] if part
+                ).strip()
+                barber_name = barber_name or str(order.barber_id)
+            else:
+                barber_name = str(order.barber_id)
 
         rows.append(
             {

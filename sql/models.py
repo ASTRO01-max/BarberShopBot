@@ -36,6 +36,7 @@ class Order(Base):
     phonenumber = Column(String(30), nullable=False)
     service_id = Column(String(50), nullable=False)
     barber_id = Column(String(50), nullable=False)
+    barber_id_name = Column(String(100), nullable=False)
     date = Column(Date, nullable=False)
     time = Column(Time, nullable=False)
     booked_date = Column(Date, nullable=False)
@@ -62,7 +63,6 @@ class Barbers(Base):
     phone = Column(String(50), nullable=True)
     experience = Column(String(50), nullable=False)
     work_days = Column(String(50), nullable=False)
-    photo = Column(String(300), nullable=True)
 
     # YANGI ustunlar (ixtiyoriy):
     work_time = Column(JSON, nullable=True)  # {"from": "09:00", "to": "18:00"}
@@ -71,6 +71,12 @@ class Barbers(Base):
     def __repr__(self):
         return f"<Barber {self.barber_first_name} {self.barber_last_name}>"
 
+class BarberPhotos(Base):
+    __tablename__ = "barber_photos"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    barber_id = Column(BigInteger, nullable=False)
+    photo = Column(String(300), nullable=True)
 
 #Xizmatlar
 class Services(Base):

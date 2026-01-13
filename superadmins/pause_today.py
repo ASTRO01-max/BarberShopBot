@@ -19,6 +19,9 @@ async def ask_pause_confirmation(message: types.Message):
     if not barber:
         return await message.answer("❌ Siz barber sifatida topilmadingiz.")
     
+    if barber.is_paused:
+        return await message.answer("Pause already active for today.")
+
     # Bugungi buyurtmalar sonini tekshirish
     today = date.today()
     barber_key = str(barber.id)
@@ -102,6 +105,11 @@ async def confirm_pause_today(callback: types.CallbackQuery):
     
     # Buyurtmalarni o'chirish
     async with async_session() as session:
+        await session.execute(
+            update(Barbers)
+            .where(Barbers.id == barber.id)
+            .values(is_paused=True)
+        )
         for order in orders:
             await session.delete(order)
         await session.commit()

@@ -3,6 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 from sqlalchemy.future import select
+from sqlalchemy import or_
 from sql.db import async_session
 from sql.models import Services, Barbers
 from utils.emoji_map import SERVICE_EMOJIS
@@ -50,11 +51,45 @@ async def service_keyboard() -> InlineKeyboardMarkup:
         return builder.as_markup()
 
 
+def _default_time_slots():
+    return [f"{h:02d}:00" for h in range(9, 18)]
+
+
+def _build_time_slots(work_time: dict):
+    if not isinstance(work_time, dict):
+        return _default_time_slots()
+
+    start = work_time.get("from")
+    end = work_time.get("to")
+    if not (isinstance(start, str) and isinstance(end, str)):
+        return _default_time_slots()
+
+    try:
+        start_dt = datetime.strptime(start, "%H:%M")
+        end_dt = datetime.strptime(end, "%H:%M")
+    except ValueError:
+        return _default_time_slots()
+
+    if start_dt >= end_dt:
+        return _default_time_slots()
+
+    slots = []
+    current = start_dt
+    while current < end_dt:
+        slots.append(current.strftime("%H:%M"))
+        current += timedelta(hours=1)
+    return slots or _default_time_slots()
+
+
 async def barber_keyboard(service_id: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     try:
         async with async_session() as session:
-            result = await session.execute(select(Barbers))
+            result = await session.execute(
+                select(Barbers).where(
+                    or_(Barbers.is_paused.is_(False), Barbers.is_paused.is_(None))
+                )
+            )
             barbers = result.scalars().all()
 
         if not barbers:
@@ -81,14 +116,28 @@ async def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup
     now = datetime.now()
     builder = InlineKeyboardBuilder()
 
-    ALL_TIMES = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
+    async with async_session() as session:
+        barber = None
+        try:
+            barber = await session.get(Barbers, int(barber_id))
+        except (TypeError, ValueError):
+            barber = None
+
+    if barber and barber.is_paused:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="ў?? Boў??sh sana yoў??q", callback_data="no_dates")]
+            ]
+        )
+
+    all_times = _build_time_slots(getattr(barber, "work_time", None))
 
     for i in range(7):
         current_day = now + timedelta(days=i)
         date_str = current_day.strftime("%Y-%m-%d")
 
         booked = await get_booked_times(barber_id, date_str)
-        available = [t for t in ALL_TIMES if t not in booked]
+        available = [t for t in all_times if t not in booked]
 
         # ❌ AGAR VAQT YO‘Q → SANANI HAM CHIQARMAYMIZ
         if not available:
@@ -116,7 +165,19 @@ async def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup
 
 
 async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKeyboardMarkup:
-    all_times = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
+    async with async_session() as session:
+        barber = None
+        try:
+            barber = await session.get(Barbers, int(barber_id))
+        except (TypeError, ValueError):
+            barber = None
+
+    if barber and barber.is_paused:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="ў?? Bo'sh vaqtlar yo'q", callback_data="no_times")]
+        ])
+
+    all_times = _build_time_slots(getattr(barber, "work_time", None))
 
     from sql.db_order_utils import get_booked_times
     booked = await get_booked_times(barber_id, date)

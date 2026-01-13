@@ -4,7 +4,7 @@ from sqlalchemy.future import select
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from sql.db import async_session
-from sql.models import Barbers
+from sql.models import Barbers, BarberPhotos
 from keyboards.booking_keyboards import back_button
 
 router = Router()
@@ -54,11 +54,20 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
 
     keyboard = barber_nav_keyboard(index, len(barbers), barber.id)
 
-    if barber.photo:
+    async with async_session() as session:
+        result = await session.execute(
+            select(BarberPhotos.photo)
+            .where(BarberPhotos.barber_id == barber.id)
+            .order_by(BarberPhotos.id.desc())
+            .limit(1)
+        )
+        barber_photo = result.scalar()
+
+    if barber_photo:
         try:
             await callback.message.edit_media(
                 types.InputMediaPhoto(
-                    media=barber.photo,
+                    media=barber_photo,
                     caption=caption,
                     parse_mode="HTML"
                 ),
@@ -67,7 +76,7 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
         except:
             await callback.message.delete()
             await callback.message.answer_photo(
-                photo=barber.photo,
+                photo=barber_photo,
                 caption=caption,
                 reply_markup=keyboard,
                 parse_mode="HTML"

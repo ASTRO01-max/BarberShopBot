@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from utils.states import AdminStates
 from sqlalchemy import select
 from sql.db import async_session
-from sql.models import Barbers, OrdinaryUser
+from sql.models import Barbers, OrdinaryUser, BarberPhotos
 
 router = Router()
 
@@ -166,8 +166,7 @@ async def save_without_photo(call: types.CallbackQuery, state: FSMContext):
             tg_username=data["tg_username"],
             phone=data["phone"],
             experience=data["experience"],
-            work_days=data["work_days"],
-            photo=None
+            work_days=data["work_days"]
         )
         session.add(barber)
         await session.commit()
@@ -217,10 +216,16 @@ async def add_barber_photo(message: types.Message, state: FSMContext):
             tg_username=tg_username,
             phone=phone,
             experience=experience,
-            work_days=work_days,
-            photo=photo_file_id   
+            work_days=work_days
         )
         session.add(new_barber)
+        await session.flush()
+        session.add(
+            BarberPhotos(
+                barber_id=new_barber.id,
+                photo=photo_file_id
+            )
+        )
         await session.commit()
 
     await message.answer(

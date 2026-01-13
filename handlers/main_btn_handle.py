@@ -52,15 +52,17 @@ async def _prepare_order_cards(orders):
             else str(o.service_id)
         )
 
-        barber_id = _to_int(o.barber_id)
-        if barber_id is not None and barber_id in barbers_by_id:
-            barber = barbers_by_id[barber_id]
-            barber_name = " ".join(
-                part for part in [barber.barber_first_name, barber.barber_last_name] if part
-            ).strip()
-            barber_name = barber_name or str(o.barber_id)
-        else:
-            barber_name = str(o.barber_id)
+        barber_name = (getattr(o, "barber_id_name", "") or "").strip()
+        if not barber_name:
+            barber_id = _to_int(o.barber_id)
+            if barber_id is not None and barber_id in barbers_by_id:
+                barber = barbers_by_id[barber_id]
+                barber_name = " ".join(
+                    part for part in [barber.barber_first_name, barber.barber_last_name] if part
+                ).strip()
+                barber_name = barber_name or str(o.barber_id)
+            else:
+                barber_name = str(o.barber_id)
 
         date_text = o.date.strftime("%Y-%m-%d") if hasattr(o.date, "strftime") else str(o.date)
         time_text = o.time.strftime("%H:%M") if hasattr(o.time, "strftime") else str(o.time)
