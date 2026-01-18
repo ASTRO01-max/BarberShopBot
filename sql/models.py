@@ -63,13 +63,13 @@ class Barbers(Base):
     phone = Column(String(50), nullable=True)
     experience = Column(String(50), nullable=False)
     work_days = Column(String(50), nullable=False)
-
-    # YANGI ustunlar (ixtiyoriy):
-    work_time = Column(JSON, nullable=True)  # {"from": "09:00", "to": "18:00"}
-    is_paused = Column(Boolean, default=False)  # Bugun ishlamaslik holati
+    work_time = Column(String(20), nullable=True)     # "09:00-18:00"
+    is_paused = Column(Boolean, default=False)
+    breakdown = Column(String(20), nullable=True)     # "13:00-14:00" yoki None
     
     def __repr__(self):
         return f"<Barber {self.barber_first_name} {self.barber_last_name}>"
+
 
 class BarberPhotos(Base):
     __tablename__ = "barber_photos"
@@ -77,6 +77,7 @@ class BarberPhotos(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     barber_id = Column(BigInteger, nullable=False)
     photo = Column(String(300), nullable=True)
+
 
 #Xizmatlar
 class Services(Base):

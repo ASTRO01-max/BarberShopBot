@@ -1,4 +1,4 @@
-# superadmins/__init__.py
+#superadmins/__init__.py
 """
 Barber panel tizimi - barcha modullarni birlashtirish
 """

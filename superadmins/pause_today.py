@@ -1,4 +1,4 @@
-# superadmins/pause_today.py
+#superadmins/pause_today.py
 from aiogram import Router, types, F
 from sqlalchemy import update, select, and_, func  # ✅ func qo'shildi
 from datetime import date

@@ -29,6 +29,8 @@ class AdminStates(StatesGroup):
     adding_barber_phone = State()
     adding_barber_experience = State()
     adding_barber_work_days = State()
+    adding_barber_work_time = State()
+    adding_barber_breakdown = State()
 
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
