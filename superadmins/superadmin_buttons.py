@@ -1,20 +1,23 @@
+#superadmins/superadmin_buttons.py
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 
-def get_barber_menu():
+def get_barber_menu(hide_pause: bool = False):
     """Barber asosiy menyusi"""
+    second_row = []
+    if not hide_pause:
+        second_row.append(KeyboardButton(text="⛔ Bugun ishlamayman"))
+    second_row.append(KeyboardButton(text="📢 Maxsus xabar"))
+
     return ReplyKeyboardMarkup(
         keyboard=[
             [
                 KeyboardButton(text="📊 O'z statistikam"),
                 KeyboardButton(text="🗓 Ish jadvalim"),
             ],
+            second_row,
             [
-                KeyboardButton(text="⛔ Bugun ishlamayman"),
-                KeyboardButton(text="✉️ Maxsus xabar"),
-            ],
-            [
-                KeyboardButton(text="📋 Bugungi buyurtmalar"),
+                KeyboardButton(text="📅 Bugungi buyurtmalar"),
             ],
         ],
         resize_keyboard=True,
@@ -38,6 +41,12 @@ def get_schedule_keyboard():
                 )
             ],
             [
+                InlineKeyboardButton(
+                    text="⏸️ Tanaffus vaqtini o'zgartirish",
+                    callback_data="barber_change_break"
+                )
+            ],
+            [
                 InlineKeyboardButton(text="⬅️ Orqaga", callback_data="barber_menu"),
             ],
         ]
@@ -53,6 +62,15 @@ def get_pause_confirm_keyboard():
             ],
             [
                 InlineKeyboardButton(text="❌ Yo'q, bekor qilish", callback_data="barber_menu")
+            ],
+        ]
+    )
+
+def get_pause_cancel_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="❌ Tugatish", callback_data="barber_pause_close")
             ],
         ]
     )

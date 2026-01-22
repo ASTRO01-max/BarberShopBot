@@ -47,11 +47,19 @@ async def barber_entry(message: types.Message):
 async def back_to_barber_menu(callback: types.CallbackQuery):
     from .superadmin_buttons import get_barber_menu
 
-    # Inline tugmali xabar bo'lsa edit qilib qaytaramiz
+    sent = False
     try:
-        await callback.message.edit_text("💈 Barber paneli", reply_markup=None)
+        await callback.message.edit_text(
+            "💈 Barber paneli",
+            reply_markup=get_barber_menu()
+        )
+        sent = True
     except Exception:
+        # edit qilib bo'lmasa, pastda yangi xabar yuboramiz
         pass
 
-    await callback.message.answer("💈 Barber paneli", reply_markup=get_barber_menu())
+    if not sent:
+        await callback.message.answer("💈 Barber paneli", reply_markup=get_barber_menu())
+
     await callback.answer()
+

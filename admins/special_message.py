@@ -1,5 +1,6 @@
 # admins/special_message.py
 from aiogram import Router, types, F
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sql.db import async_session
@@ -20,7 +21,7 @@ async def start_broadcast(message: types.Message, state: FSMContext):
     )
 
 # --- Bekor qilish buyrug'i ---
-@router.message(F.text == "/cancel")
+@router.message(StateFilter(BroadcastState.waiting_for_message), F.text == "/cancel")
 async def cancel_broadcast(message: types.Message, state: FSMContext):
     """Yuborish jarayonini bekor qilish"""
     await state.clear()

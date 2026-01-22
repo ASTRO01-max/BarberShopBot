@@ -10,49 +10,84 @@ from keyboards.booking_keyboards import back_button
 router = Router()
 
 
-# Pagination tugmalari
-def barber_nav_keyboard(index: int, total: int, barber_id: int):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Oldingi",
-                    callback_data=f"barber_prev_{index}"
-                ),
-                InlineKeyboardButton(
-                    text="➡️ Keyingi",
-                    callback_data=f"barber_next_{index}"
-                ),
-            ],
+def barber_nav_keyboard(index: int, total: int, barber_id: int, is_paused: bool):
+    inline_keyboard = [
+        [
+            InlineKeyboardButton(
+                text="⬅️ Oldingi",
+                callback_data=f"barber_prev_{index}"
+            ),
+            InlineKeyboardButton(
+                text="➡️ Keyingi",
+                callback_data=f"barber_next_{index}"
+            ),
+        ],
+    ]
+
+    # ✅ Pause bo'lsa — "Navbat olish" tugmasi chiqmaydi
+    if not is_paused:
+        inline_keyboard.append(
             [
                 InlineKeyboardButton(
                     text="🗓️ Navbat olish",
                     callback_data=f"book_barber_{barber_id}"
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔙 Orqaga",
-                    callback_data="back"
-                )
-            ],
+            ]
+        )
+
+    inline_keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="🔙 Orqaga",
+                callback_data="back"
+            )
         ]
     )
 
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
-# Bitta barberni chiqarish
+
 async def send_barber(callback: types.CallbackQuery, barbers, index: int):
     barber = barbers[index]
 
-    caption = (
-        f"👨‍🎤 <b>{barber.barber_first_name} {barber.barber_last_name}</b>\n\n"
-        f"💼 <b>Tajribasi:</b> {barber.experience}\n"
-        f"📅 <b>Ish kunlari:</b> {barber.work_days}\n"
-        f"📞 <b>Aloqa:</b> <code>{barber.phone}</code>\n\n"
-        f"📌 <i>({index + 1} / {len(barbers)})</i>"
-    )
+    lines = []
 
-    keyboard = barber_nav_keyboard(index, len(barbers), barber.id)
+    # Ism
+    full_name = f"{barber.barber_first_name or ''} {barber.barber_last_name or ''}".strip()
+    lines.append(f"👨‍🎤 <b>{full_name}</b>\n")
+
+    # Status
+    if getattr(barber, "is_paused", False):
+        lines.append("ℹ️ <b>Holati:</b> ⛔️ Bugun ishlamaydi\n")
+    else:
+        lines.append("ℹ️ <b>Holati:</b> 🕒 Bugun ishda\n")
+
+    # Faqat mavjud bo'lgan maydonlar
+    if barber.experience:
+        lines.append(f"💼 <b>Tajribasi:</b> {barber.experience}\n")
+
+    if barber.work_days:
+        lines.append(f"📅 <b>Ish kunlari:</b> {barber.work_days}\n")
+
+    if barber.work_time:
+        lines.append(f"⏰ <b>Ish vaqti:</b> {barber.work_time}\n")
+
+    if barber.breakdown:
+        lines.append(f"⏸️ <b>Tanafus vaqti:</b> {barber.breakdown}\n")
+
+    if barber.phone:
+        lines.append(f"📞 <b>Aloqa:</b> <code>{barber.phone}</code>\n")
+
+    lines.append(f"\n📌 <i>({index + 1} / {len(barbers)})</i>")
+
+    caption = "".join(lines)
+
+    keyboard = barber_nav_keyboard(
+        index,
+        len(barbers),
+        barber.id,
+        getattr(barber, "is_paused", False)
+    )
 
     async with async_session() as session:
         result = await session.execute(
@@ -73,8 +108,11 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
                 ),
                 reply_markup=keyboard
             )
-        except:
-            await callback.message.delete()
+        except Exception:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
             await callback.message.answer_photo(
                 photo=barber_photo,
                 caption=caption,
@@ -88,8 +126,11 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
-        except:
-            await callback.message.delete()
+        except Exception:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
             await callback.message.answer(
                 caption,
                 reply_markup=keyboard,
@@ -97,7 +138,6 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
             )
 
 
-# Barberlar ro‘yxati
 async def show_barbers(callback: types.CallbackQuery):
     async with async_session() as session:
         result = await session.execute(select(Barbers))
@@ -113,7 +153,6 @@ async def show_barbers(callback: types.CallbackQuery):
     await send_barber(callback, barbers, 0)
 
 
-# Next / Prev
 async def navigate_barbers(callback: types.CallbackQuery):
     action, index = callback.data.split("_")[1], int(callback.data.split("_")[2])
 

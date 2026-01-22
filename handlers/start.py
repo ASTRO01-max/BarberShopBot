@@ -86,4 +86,3 @@ async def start_bot_pressed(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.answer("🚀 Bot ishga tushdi")
 
- 

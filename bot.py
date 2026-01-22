@@ -1,6 +1,6 @@
 #bot.py
 import asyncio
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from config import BOT_TOKEN
 from utils.logger import setup_logger
 from admins import router as admins_router
@@ -99,25 +99,29 @@ dp.include_router(main_btn_handle.router)
 # FSM - Xizmat tanlash
 dp.callback_query.register(
     booking.book_step1,
-    lambda c: c.data.startswith("service_")
+    booking.UserState.waiting_for_service,
+    F.data.startswith("service_")
 )
 
 # FSM - Usta tanlash
 dp.callback_query.register(
     booking.book_step2,
-    lambda c: c.data.startswith("barber_")
+    booking.UserState.waiting_for_barber,
+    F.data.startswith("barber_")
 )
 
 # FSM - Sana tanlash
 dp.callback_query.register(
     booking.book_step3,
-    lambda c: c.data.startswith("date_")
+    booking.UserState.waiting_for_date,
+    F.data.startswith("date_")
 )
 
 # FSM - Tasdiqlash
 dp.callback_query.register(
     booking.confirm,
-    lambda c: c.data.startswith("confirm_")
+    booking.UserState.waiting_for_time,
+    F.data.startswith("confirm_")
 )
 
 # Orqaga menyuga qaytish

@@ -6,12 +6,9 @@ from sqlalchemy import select
 from sql.db import async_session
 from sql.models import Order
 from .superadmin import get_barber_by_tg_id
+from utils.states import BarberPage
 
 router = Router()
-
-
-class BarberMessageStates(StatesGroup):
-    waiting_for_message = State()
 
 
 @router.message(F.text == "✉️ Maxsus xabar")
@@ -30,7 +27,7 @@ async def start_special_message(message: types.Message, state: FSMContext):
         )
         client_ids = result.scalars().all()
 
-    await state.set_state(BarberMessageStates.waiting_for_message)
+    await state.set_state(BarberPage.waiting_for_message)
 
     await message.answer(
         f"✏️ <b>Maxsus xabar yuborish</b>\n\n"
@@ -42,7 +39,7 @@ async def start_special_message(message: types.Message, state: FSMContext):
     )
 
 
-@router.message(BarberMessageStates.waiting_for_message)
+@router.message(BarberPage.waiting_for_message)
 async def send_special_message(message: types.Message, state: FSMContext):
     if message.text == "/cancel":
         await state.clear()

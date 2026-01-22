@@ -38,3 +38,10 @@ class BroadcastState(StatesGroup):
 class UserForm(StatesGroup):
     fullname = State()
     phone = State()
+
+
+class BarberPage(StatesGroup):
+    waiting_for_work_days = State()
+    waiting_for_work_time = State()
+    waiting_for_message = State()
+    waiting_for_break_time = State()
