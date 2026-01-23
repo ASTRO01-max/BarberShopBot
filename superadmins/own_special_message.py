@@ -11,7 +11,7 @@ from utils.states import BarberPage
 router = Router()
 
 
-@router.message(F.text == "✉️ Maxsus xabar")
+@router.message(F.text == "📢 Maxsus xabar")
 async def start_special_message(message: types.Message, state: FSMContext):
     tg_id = message.from_user.id
     barber = await get_barber_by_tg_id(tg_id)

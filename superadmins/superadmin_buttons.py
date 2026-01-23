@@ -1,5 +1,38 @@
-#superadmins/superadmin_buttons.py
+﻿#superadmins/superadmin_buttons.py
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+
+
+def get_todays_orders_keyboard(order_id: int, page: int, total_pages: int) -> InlineKeyboardMarkup:
+    inline_keyboard = [
+        [
+            InlineKeyboardButton(
+                text="🔔 Bildirishnoma yuborish",
+                callback_data=f"todays_notify_{order_id}"
+            )
+        ]
+    ]
+
+    nav_row = []
+    if total_pages > 1:
+        if page > 1:
+            nav_row.append(
+                InlineKeyboardButton(
+                    text="⬅️ Oldingi",
+                    callback_data=f"todays_orders_page_{page - 1}"
+                )
+            )
+        if page < total_pages:
+            nav_row.append(
+                InlineKeyboardButton(
+                    text="Keyingi ➡️",
+                    callback_data=f"todays_orders_page_{page + 1}"
+                )
+            )
+
+    if nav_row:
+        inline_keyboard.append(nav_row)
+
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
 def get_barber_menu(hide_pause: bool = False):
@@ -75,6 +108,17 @@ def get_pause_cancel_keyboard():
         ]
     )
 
+def get_back_statistics_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📊 Statistikaga qaytish",
+                    callback_data="back_statistics"
+                )
+            ]
+        ]
+    )
 
 def get_order_actions_keyboard(order_id: int, client_tg_id: int = None, phone: str = None):
     """Buyurtma bilan ishlash tugmalari"""
@@ -105,3 +149,4 @@ def get_order_actions_keyboard(order_id: int, client_tg_id: int = None, phone: s
     )
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+

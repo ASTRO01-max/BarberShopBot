@@ -66,6 +66,7 @@ class Barbers(Base):
     work_time = Column(String(20), nullable=True)     # "09:00-18:00"
     is_paused = Column(Boolean, default=False)
     breakdown = Column(String(20), nullable=True)     # "13:00-14:00" yoki None
+    is_paused_date = Column(Date, nullable=False)
     
     def __repr__(self):
         return f"<Barber {self.barber_first_name} {self.barber_last_name}>"
