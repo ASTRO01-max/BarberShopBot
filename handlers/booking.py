@@ -1,6 +1,7 @@
 #handlers/booking.py
 import logging
 from datetime import datetime
+import time 
 from aiogram import types, F, Router
 from aiogram.types import (
     Message,
@@ -135,6 +136,7 @@ async def process_phonenumber(message: Message, state: FSMContext):
     )
 
     await state.set_state(UserState.waiting_for_service)
+    
 
 
 # --- 4-qadam: Xizmat ---
@@ -159,7 +161,7 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
             )
 
         await state.set_state(UserState.waiting_for_date)
-        await callback.answer("🧑‍🎤 Barber avtomatik tanlandi ✅")
+        await callback.answer("💈 Xizmat turi tanlandi ✅")
         return
 
     if callback.message.photo:
@@ -174,11 +176,13 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
         )
 
     await state.set_state(UserState.waiting_for_barber)
+    await callback.answer("💈 Xizmat turi tanlandi ✅")
 
 
 # --- 5-qadam: Barber ---
 async def book_step2(callback: CallbackQuery, state: FSMContext):
     _, service_id, barber_id = callback.data.split("_")[:3]
+
     await state.update_data(
         service_id=service_id,
         barber_id=barber_id
@@ -369,9 +373,10 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         )
 
     await state.clear()
-    await callback.answer("✅ Navbat olindi")
-
+    await callback.answer("⏰ Vaqt tanlandi ✅")
     await callback.message.answer(
         "🏠 Asosiy menyu:",
         reply_markup=get_main_menu()
     )
+    time.sleep(3)
+    await callback.answer("✅ Navbat olindi")

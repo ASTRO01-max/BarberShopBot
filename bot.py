@@ -15,9 +15,9 @@ from handlers import (
     contact,
     booking,
     back,
-    main_btn_handle,
     support,
 )
+from handlers.main_btn_handle import router as main_btn_router
 
 # Bot va Dispatcher obyektlari
 bot = Bot(token=BOT_TOKEN)
@@ -94,7 +94,7 @@ dp.callback_query.register(
     lambda c: c.data == "book"
 )
 
-dp.include_router(main_btn_handle.router)
+dp.include_router(main_btn_router)
 
 # FSM - Xizmat tanlash
 dp.callback_query.register(
