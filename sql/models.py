@@ -1,8 +1,8 @@
 # sql/models.py
-from sqlalchemy import Column, Integer, BigInteger, String, Date, Time, Boolean, JSON
+from sqlalchemy import Column, Integer, BigInteger, String, Date, Time, Boolean, JSON, DateTime, Float
 from sqlalchemy import LargeBinary
+from sqlalchemy.sql import func
 from sql.db import Base
-
 
 #Vaqtinchalik foydalanuvchi
 class OrdinaryUser(Base):
@@ -98,3 +98,25 @@ class SuperAdmins(Base):
     super_admin_fullname = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
 
+
+class Info(Base):
+    __tablename__ = "info"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # Telefon va aloqa kanallari
+    telegram = Column(String(150), nullable=True)       # @username yoki link
+    instagram = Column(String(150), nullable=True)      # link yoki username
+    website = Column(String(200), nullable=True)        # optional
+    # Manzil matni (foydalanuvchiga ko'rsatish uchun)
+    region = Column(String(120), nullable=True)         # Toshkent, Samarqand...
+    district = Column(String(120), nullable=True)       # Chilonzor...
+    street = Column(String(200), nullable=True)         # ko'cha/uy
+    landmark = Column(String(200), nullable=True)       # mo'ljal
+    address_text = Column(String(400), nullable=True)   # “Toshkent, Chilonzor ...”
+    # Lokatsiya (xaritada ko'rsatish uchun)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    # Ish vaqti
+    work_time_text = Column(String(200), nullable=True) # “09:00–21:00”
+
+    

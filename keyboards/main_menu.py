@@ -7,7 +7,8 @@ def get_main_menu():
         ("🗓️ Navbat olish", "book"),
         ("💈 Xizmatlar", "services"),
         ("💈 Barberlar", "barbers"),
-        ("📞 Bog'lanish", "contact")
+        ("ℹ️ Ma'lumot / Kontaktlar", "contact")
+
     ]
     for text, data in buttons:
         builder.button(text=text, callback_data=data)

@@ -1,5 +1,6 @@
 #handlers/booking.py
 import logging
+import re
 from datetime import datetime
 import time 
 from aiogram import types, F, Router
@@ -104,26 +105,36 @@ async def process_fullname(message: Message, state: FSMContext):
 
 # --- 3-qadam: Telefon ---
 async def process_phonenumber(message: Message, state: FSMContext):
-    phonenumber = None
+    raw_phone = None
 
     if message.contact and message.contact.phone_number:
-        phonenumber = message.contact.phone_number
+        raw_phone = message.contact.phone_number
     elif message.text:
-        phonenumber = message.text.strip()
+        raw_phone = message.text.strip()
+
+    if not raw_phone:
+        await message.answer("❌ Iltimos, telefon raqamini yuboring (masalan: +998901234567).")
+        return
+
+    digits = re.sub(r"\D", "", raw_phone)
+
+    # Mobil Telegram ko'pincha: "998901234567" ko'rinishida yuboradi
+    if digits.startswith("998") and len(digits) == 12:
+        phonenumber = f"+{digits}"
+    # Ba'zan foydalanuvchi 9 xonali lokal format yuborishi mumkin: "901234567"
+    elif len(digits) == 9:
+        phonenumber = f"+998{digits}"
+    else:
+        phonenumber = None
 
     if not phonenumber or not phonenumber.startswith("+998") or len(phonenumber) != 13:
-        await message.answer(
-            "❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567)."
-        )
+        await message.answer("❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567).")
         return
 
     data = await state.get_data()
     fullname = data.get("fullname") or message.from_user.full_name or "Ism kiritilmagan"
 
-    await state.update_data(
-        fullname=fullname,
-        phonenumber=phonenumber
-    )
+    await state.update_data(fullname=fullname, phonenumber=phonenumber)
 
     await message.answer(
         "📱 Raqamingiz qabul qilindi ✅",
@@ -136,7 +147,7 @@ async def process_phonenumber(message: Message, state: FSMContext):
     )
 
     await state.set_state(UserState.waiting_for_service)
-    
+
 
 
 # --- 4-qadam: Xizmat ---
@@ -380,3 +391,4 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     )
     time.sleep(3)
     await callback.answer("✅ Navbat olindi")
+    

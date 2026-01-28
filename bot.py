@@ -18,7 +18,7 @@ from handlers import (
     support,
 )
 from handlers.main_btn_handle import router as main_btn_router
-
+    
 # Bot va Dispatcher obyektlari
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -70,10 +70,7 @@ dp.callback_query.register(
 
 
 # Bog‘lanish uchun
-dp.callback_query.register(
-    contact.contact,
-    lambda c: c.data == "contact"
-)
+dp.include_router(contact.router)
 
 
 dp.callback_query.register(
