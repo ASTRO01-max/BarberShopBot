@@ -1,3 +1,4 @@
+from datetime import date
 from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
@@ -259,6 +260,7 @@ async def save_without_photo(call: types.CallbackQuery, state: FSMContext):
             work_days=data["work_days"],
             work_time=data.get("work_time"),
             breakdown=data.get("breakdown"),
+            is_paused_date=date.today(),
         )
         session.add(barber)
         await session.commit()
@@ -318,6 +320,7 @@ async def add_barber_photo(message: types.Message, state: FSMContext):
             work_days=work_days,
             work_time=work_time,
             breakdown=breakdown,
+            is_paused_date=date.today(),
         )
         session.add(new_barber)
         await session.flush()

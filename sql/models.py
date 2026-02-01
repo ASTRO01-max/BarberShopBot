@@ -110,7 +110,6 @@ class Info(Base):
     region = Column(String(120), nullable=True)         # Toshkent, Samarqand...
     district = Column(String(120), nullable=True)       # Chilonzor...
     street = Column(String(200), nullable=True)         # ko'cha/uy
-    landmark = Column(String(200), nullable=True)       # mo'ljal
     address_text = Column(String(400), nullable=True)   # “Toshkent, Chilonzor ...”
     # Lokatsiya (xaritada ko'rsatish uchun)
     latitude = Column(Float, nullable=True)

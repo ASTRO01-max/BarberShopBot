@@ -18,7 +18,7 @@ from handlers import (
     support,
 )
 from handlers.main_btn_handle import router as main_btn_router
-    
+
 # Bot va Dispatcher obyektlari
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -56,12 +56,6 @@ dp.callback_query.register(
     lambda c: c.data == "barbers"
 )
 
-# Ustalar menyusi
-dp.callback_query.register(
-    barbers.show_barbers,
-    lambda c: c.data == "barbers"
-)
-
 # Next / Prev
 dp.callback_query.register(
     barbers.navigate_barbers,
@@ -79,13 +73,6 @@ dp.callback_query.register(
 )
 
 
-dp.callback_query.register(
-    booking.start_booking,
-    lambda c: c.data == "book"
-)
-
-
-# Buyurtma boshlash
 dp.callback_query.register(
     booking.start_booking,
     lambda c: c.data == "book"
@@ -112,6 +99,12 @@ dp.callback_query.register(
     booking.book_step3,
     booking.UserState.waiting_for_date,
     F.data.startswith("date_")
+)
+
+# FSM - Sana tanlash (orqaga)
+dp.callback_query.register(
+    booking.back_to_date,
+    F.data.startswith("back_date_")
 )
 
 # FSM - Tasdiqlash

@@ -55,12 +55,19 @@ def _default_time_slots():
     return [f"{h:02d}:00" for h in range(9, 18)]
 
 
-def _build_time_slots(work_time: dict):
-    if not isinstance(work_time, dict):
-        return _default_time_slots()
+def _build_time_slots(work_time):
+    start = None
+    end = None
 
-    start = work_time.get("from")
-    end = work_time.get("to")
+    if isinstance(work_time, str):
+        if "-" in work_time:
+            parts = [p.strip() for p in work_time.split("-", 1)]
+            if len(parts) == 2:
+                start, end = parts
+    elif isinstance(work_time, dict):
+        start = work_time.get("from")
+        end = work_time.get("to")
+
     if not (isinstance(start, str) and isinstance(end, str)):
         return _default_time_slots()
 
@@ -164,7 +171,7 @@ async def date_keyboard(service_id: str, barber_id: str) -> InlineKeyboardMarkup
     return builder.as_markup()
 
 
-async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKeyboardMarkup:
+async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKeyboardMarkup | None:
     async with async_session() as session:
         barber = None
         try:
@@ -173,9 +180,7 @@ async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKey
             barber = None
 
     if barber and barber.is_paused:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="ў?? Bo'sh vaqtlar yo'q", callback_data="no_times")]
-        ])
+        return None
 
     all_times = _build_time_slots(getattr(barber, "work_time", None))
 
@@ -184,9 +189,7 @@ async def time_keyboard(service_id: str, barber_id: str, date: str) -> InlineKey
     available = [t for t in all_times if t not in booked]
 
     if not available:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Bo'sh vaqtlar yo'q", callback_data="no_times")]
-        ])
+        return None
 
     markup = InlineKeyboardMarkup(inline_keyboard=[])
     row = []

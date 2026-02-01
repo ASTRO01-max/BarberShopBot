@@ -22,7 +22,6 @@ EDITABLE_FIELDS = [
     ("region", "🗺️ Viloyat/Shahar"),
     ("district", "🏙️ Tuman"),
     ("street", "🛣️ Ko'cha/Manzil"),
-    ("landmark", "📌 Mo'ljal"),
     ("address_text", "📍 Manzil (matn)"),
     ("work_time_text", "🕒 Ish vaqti"),
     ("location", "📌 Lokatsiya (xarita)"),  # virtual field: lat/lon
@@ -66,7 +65,6 @@ def _info_preview_text(info) -> str:
         f"🗺️ Viloyat/Shahar: {v(info.region)}\n"
         f"🏙️ Tuman: {v(info.district)}\n"
         f"🛣️ Ko'cha/Manzil: {v(info.street)}\n"
-        f"📌 Mo'ljal: {v(info.landmark)}\n"
         f"📍 Manzil (matn): {v(info.address_text)}\n\n"
         f"📌 Lokatsiya: {lat}, {lon}\n"
         f"🕒 Ish vaqti: {v(info.work_time_text)}\n"

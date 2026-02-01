@@ -1,8 +1,6 @@
 #handlers/booking.py
 import logging
 import re
-from datetime import datetime
-import time 
 from aiogram import types, F, Router
 from aiogram.types import (
     Message,
@@ -15,7 +13,6 @@ from keyboards import booking_keyboards
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
 from sql.db_users_utils import get_user
-from sql.db_barbers import get_barbers
 from sql.db_order_utils import get_booked_times, save_order
 from utils.states import UserState
 from utils.validators import parse_user_date
@@ -255,7 +252,9 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
                 reply_markup=keyboard
             )
 
-    await state.set_state(UserState.waiting_for_time)
+    await state.set_state(
+        UserState.waiting_for_date if keyboard is None else UserState.waiting_for_time
+    )
     await callback.answer("📅 Sana qabul qilindi ✅")
 
 
@@ -389,6 +388,4 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         "🏠 Asosiy menyu:",
         reply_markup=get_main_menu()
     )
-    time.sleep(3)
-    await callback.answer("✅ Navbat olindi")
     

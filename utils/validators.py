@@ -3,7 +3,9 @@ import re
 from datetime import datetime, timedelta
 
 def validate_fullname(fullname: str) -> bool:
-    return bool(re.fullmatch(r"[A-Za-zʻʼ‘’`'\"-]+ [A-Za-zʻʼ‘’`'\"-]+", fullname))
+    name_part = r"[A-Za-z\u00C0-\u024F\u02BB\u02BC\u2019'`-]+"
+    pattern = rf"{name_part} {name_part}"
+    return bool(re.fullmatch(pattern, fullname.strip()))
 
 def validate_phone(phone: str) -> bool:
     return bool(re.fullmatch(r"\+998\d{9}", phone))

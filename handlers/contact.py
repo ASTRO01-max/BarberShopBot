@@ -82,10 +82,7 @@ def _normalize_website(v: str | None) -> str | None:
 
 
 def _pretty_text(info) -> str:
-    title = _safe(getattr(info, "title", None))
-
-    phone1 = _safe(getattr(info, "phone", None))
-    phone2 = _safe(getattr(info, "phone2", None))
+    title = "Barbershop"
 
     telegram = _safe(getattr(info, "telegram", None))
     instagram = _safe(getattr(info, "instagram", None))
@@ -94,33 +91,24 @@ def _pretty_text(info) -> str:
     region = _safe(getattr(info, "region", None))
     district = _safe(getattr(info, "district", None))
     street = _safe(getattr(info, "street", None))
-    landmark = _safe(getattr(info, "landmark", None))
     address_text = _safe(getattr(info, "address_text", None))
 
     work_time_text = _safe(getattr(info, "work_time_text", None))
-    extra = _safe(getattr(info, "extra", None))
 
-    # Zamonaviy card-style
     return (
-        f"✨ <b>{title}</b>\n"
-        f"<i>Kontaktlar va manzil ma’lumotlari</i>\n"
-        f"────────────────────\n\n"
-        f"📞 <b>Aloqa</b>\n"
-        f"• 1-raqam: <code>{phone1}</code>\n"
-        f"• 2-raqam: <code>{phone2}</code>\n\n"
-        f"🕒 <b>Ish vaqti</b>\n"
-        f"• {work_time_text}\n\n"
-        f"📍 <b>Manzil</b>\n"
-        f"• {address_text}\n"
-        f"• {region} / {district}\n"
-        f"• {street}\n"
-        f"• Mo‘ljal: {landmark}\n\n"
-        f"🌐 <b>Onlayn</b>\n"
-        f"• Telegram: {_safe(telegram)}\n"
-        f"• Instagram: {_safe(instagram)}\n"
-        f"• Website: {_safe(website)}\n\n"
-        f"📝 <b>Qo‘shimcha</b>\n"
-        f"• {extra}\n"
+        f"? <b>{title}</b>\n"
+        f"<i>Kontaktlar va manzil ma'lumotlari</i>\n"
+        f"------------------------------\n\n"
+        f"?? <b>Ish vaqti</b>\n"
+        f"? {work_time_text}\n\n"
+        f"?? <b>Manzil</b>\n"
+        f"? {address_text}\n"
+        f"? {region} / {district}\n"
+        f"? {street}\n\n"
+        f"?? <b>Onlayn</b>\n"
+        f"? Telegram: {telegram}\n"
+        f"? Instagram: {instagram}\n"
+        f"? Website: {website}\n"
     )
 
 
@@ -134,16 +122,14 @@ def _venue_address(info) -> str:
     district = _safe(getattr(info, "district", None))
     street = _safe(getattr(info, "street", None))
     work_time_text = _safe(getattr(info, "work_time_text", None))
-    phone1 = _safe(getattr(info, "phone", None))
 
     compact = (
         f"{address_text}\n"
         f"{region} / {district}\n"
         f"{street}\n"
-        f"Ish vaqti: {work_time_text}\n"
-        f"Tel: {phone1}"
+        f"Ish vaqti: {work_time_text}"
     )
-    # Venue address limitlari qat’iy bo‘lishi mumkin — ehtiyot uchun qisqartiramiz
+    # Venue address limitlari qat'iy bo'lishi mumkin ? ehtiyot uchun qisqartiramiz
     return _clip(compact, 240)
 
 
@@ -335,3 +321,4 @@ async def contact_back(callback: types.CallbackQuery, state: FSMContext):
 
 # Backward compatibility (old bot.py may import contact.contact)
 contact = router
+
