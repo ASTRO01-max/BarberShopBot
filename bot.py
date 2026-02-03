@@ -50,6 +50,18 @@ dp.callback_query.register(
     lambda c: c.data == "services"
 )
 
+# ✅ Services Next / Prev
+dp.callback_query.register(
+    services.navigate_services,
+    lambda c: c.data.startswith(("services_next_", "services_prev_"))
+)
+
+# ✅ Service orqali booking boshlash
+dp.callback_query.register(
+    booking.start_booking_from_service,
+    lambda c: c.data.startswith("book_service_")
+)
+
 # Ustalarni ko‘rsatish
 dp.callback_query.register(
     barbers.show_barbers,

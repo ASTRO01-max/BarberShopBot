@@ -60,24 +60,70 @@ async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
     barber_id = callback.data.split("_")[2]
     user_id = callback.from_user.id
 
+    # Barber tanlovini saqlab qo'yamiz (keyingi step1 da kerak bo'ladi)
     await state.update_data(barber_id=barber_id)
 
-    text = "💈 Xizmat turini tanlang:"
-    keyboard = await booking_keyboards.service_keyboard()
+    user = await get_user(user_id)
 
-    if callback.message.photo:
-        await callback.message.edit_caption(
-            caption=text,
-            reply_markup=keyboard
-        )
+    if user:
+        text = "💈 Xizmat turini tanlang:"
+        keyboard = await booking_keyboards.service_keyboard()
+
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard)
+        else:
+            await callback.message.edit_text(text, reply_markup=keyboard)
+
+        await state.set_state(UserState.waiting_for_service)
+        await callback.answer("🧑‍🎤 Barber tanlandi, navbat boshlandi ✅")
+
     else:
-        await callback.message.edit_text(
-            text,
-            reply_markup=keyboard
-        )
+        text = "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
 
-    await state.set_state(UserState.waiting_for_service)
-    await callback.answer("🧑‍🎤 Barber tanlandi, navbat boshlandi ✅")
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text)
+        else:
+            await callback.message.edit_text(text)
+
+        await state.set_state(UserState.waiting_for_fullname)
+        await callback.answer("🧑‍🎤 Barber tanlandi, ro'yxatdan o'tish boshlandi ✅")
+
+
+# --- Service orqali boshlash ---
+async def start_booking_from_service(callback: CallbackQuery, state: FSMContext):
+    # callback_data: book_service_{service_name}
+    service_id = callback.data.split("_", 2)[2]  # "Soch olish" kabi nomlar
+    user_id = callback.from_user.id
+
+    # Service tanlovini saqlab qo'yamiz (keyingi step2/step3 uchun)
+    await state.update_data(service_id=service_id)
+
+    user = await get_user(user_id)
+
+    if user:
+        text = "💈 Barberni tanlang:"
+        keyboard = await booking_keyboards.barber_keyboard(service_id)
+
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard)
+        else:
+            await callback.message.edit_text(text, reply_markup=keyboard)
+
+        await state.set_state(UserState.waiting_for_barber)
+        await callback.answer("💈 Xizmat tanlandi, navbat boshlandi ✅")
+
+    else:
+        text = "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text)
+        else:
+            await callback.message.edit_text(text)
+
+        # service_id saqlangan, user ro'yxatdan o'tgach siz book_step1/2 oqimini davom ettirasiz
+        await state.set_state(UserState.waiting_for_fullname)
+        await callback.answer("💈 Xizmat tanlandi, ro'yxatdan o'tish boshlandi ✅")
+
 
 
 # --- 2-qadam: Ism ---

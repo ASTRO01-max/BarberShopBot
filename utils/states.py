@@ -1,8 +1,6 @@
 #utils/states.py
 from aiogram.fsm.state import StatesGroup, State
 
-from aiogram.fsm.state import StatesGroup, State
-
 class UserState(StatesGroup):
     waiting_for_fullname = State()
     waiting_for_phonenumber = State()
@@ -20,6 +18,7 @@ class AdminStates(StatesGroup):
     adding_service = State()
     adding_barber = State()
     adding_barber_photo = State()
+    adding_service_photo = State()
     adding_photo_choice = State()      #Barber rasmini kutish
     adding_service = State()           # Servis nomini kutish
     adding_service_price = State()     # Servis narxini kutish

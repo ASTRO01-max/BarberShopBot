@@ -88,6 +88,8 @@ class Services(Base):
     name = Column(String(100), unique=True, nullable=False)
     price = Column(Integer, nullable=False)
     duration = Column(String(50), nullable=False)
+    photo = Column(String(300), nullable=True)
+
 
 #Super Adminlar
 class SuperAdmins(Base):
