@@ -19,7 +19,7 @@ def service_nav_keyboard(index: int, total: int, service_name: str):
                 InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"services_next_{index}"),
             ],
             [
-                InlineKeyboardButton(text="🗓️ Navbat olish", callback_data=f"book_service_{service_name}"),
+                InlineKeyboardButton(text="🗓️ Navbat boshlash", callback_data=f"book_service_{service_name}"),
             ],
             [
                 InlineKeyboardButton(text="🔙 Orqaga", callback_data="back"),

@@ -121,3 +121,21 @@ class Info(Base):
     work_time_text = Column(String(200), nullable=True) # “09:00–21:00”
 
     
+class BarberOrderInbox(Base):
+    __tablename__ = "barber_order_inbox"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Order ID (orders.id)
+    order_id = Column(Integer, nullable=False, index=True)
+
+    # Barber telegram id (Barbers.tg_id)
+    barber_tg_id = Column(BigInteger, nullable=False, index=True)
+
+    # Barberga telegramda yuborildimi?
+    is_delivered = Column(Boolean, default=False)
+
+    # Barber ko�rdimi? (detail bosdi yoki yopdi)
+    is_seen = Column(Boolean, default=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

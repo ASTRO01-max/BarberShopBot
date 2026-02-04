@@ -14,6 +14,7 @@ from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
 from sql.db_users_utils import get_user
 from sql.db_order_utils import get_booked_times, save_order
+from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.states import UserState
 from utils.validators import parse_user_date
 
@@ -403,7 +404,11 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         "time": time_str,
     }
 
-    await save_order(order)
+    created = await save_order(order)
+    try:
+        await notify_barber_realtime(callback.bot, created.id, int(barber_id))
+    except Exception:
+        logger.exception("notify_barber_realtime failed")
 
     # 5️⃣ Natijani foydalanuvchiga ko‘rsatish
     text = (

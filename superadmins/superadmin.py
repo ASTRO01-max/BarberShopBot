@@ -4,6 +4,8 @@ from aiogram.filters import Command
 from sqlalchemy import select
 from sql.db import async_session
 from sql.models import Barbers
+from .panel_presence import touch_barber
+from .order_realtime_notify import flush_undelivered_to_barber
 
 router = Router()
 
@@ -32,6 +34,9 @@ async def barber_entry(message: types.Message):
             parse_mode="HTML"
         )
 
+    touch_barber(tg_id)
+    await flush_undelivered_to_barber(message.bot, tg_id)
+
     barber = await get_barber_by_tg_id(tg_id)
     from .superadmin_buttons import get_barber_menu
 
@@ -46,6 +51,7 @@ async def barber_entry(message: types.Message):
 @router.callback_query(F.data == "barber_menu")
 async def back_to_barber_menu(callback: types.CallbackQuery):
     from .superadmin_buttons import get_barber_menu
+    touch_barber(callback.from_user.id)
 
     sent = False
     try:
