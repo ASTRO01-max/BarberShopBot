@@ -1,8 +1,9 @@
+﻿# handlers/contact.py
 import re
-from aiogram import Router, types, F
+import asyncio
+from aiogram import Router, types, F, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-
 from sql.db_contacts import ensure_info_row, get_info
 from handlers.back import back_to_menu
 
@@ -81,34 +82,92 @@ def _normalize_website(v: str | None) -> str | None:
     return v
 
 
+def _display_title(info) -> str:
+    title = _safe(getattr(info, "title", None))
+    return "Barbershop" if title == "—" else title
+
+
+def _parse_coord(value) -> float | None:
+    try:
+        v = str(value).strip()
+        if not v:
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _safe_delete_or_clear(bot: Bot, chat_id: int, message_id: int | None) -> None:
+    if not message_id:
+        return
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=int(message_id))
+        return
+    except Exception:
+        pass
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=int(message_id),
+            reply_markup=None,
+        )
+    except Exception:
+        pass
+
+
 def _pretty_text(info) -> str:
-    title = "Barbershop"
+    title = _display_title(info)
 
-    telegram = _safe(getattr(info, "telegram", None))
-    instagram = _safe(getattr(info, "instagram", None))
-    website = _safe(getattr(info, "website", None))
+    # Kontaktlar
+    telegram_raw = getattr(info, "telegram", None)
+    instagram_raw = getattr(info, "instagram", None)
+    website_raw = getattr(info, "website", None)
 
+    # Telefonlar
+    phone1 = _safe(getattr(info, "phone", None))
+    phone2 = _safe(getattr(info, "phone2", None))
+
+    # Manzil
     region = _safe(getattr(info, "region", None))
     district = _safe(getattr(info, "district", None))
     street = _safe(getattr(info, "street", None))
     address_text = _safe(getattr(info, "address_text", None))
 
+    # Ish vaqti
     work_time_text = _safe(getattr(info, "work_time_text", None))
 
+    # Linklar (agar user @username yoki username kiritgan bo‘lsa ham chiroyli URL bo‘ladi)
+    tg = _normalize_telegram(telegram_raw)
+    ig = _normalize_instagram(instagram_raw)
+    web = _normalize_website(website_raw)
+
+    # Matnda ko‘rinishi uchun (link bo‘lsa URL, bo‘lmasa "—")
+    telegram_show = tg or _safe(telegram_raw)
+    instagram_show = ig or _safe(instagram_raw)
+    website_show = web or _safe(website_raw)
+
+    phones_block = []
+    if phone1 != "—":
+        phones_block.append(f"📞 <b>Telefon 1:</b> {phone1}")
+    if phone2 != "—":
+        phones_block.append(f"📞 <b>Telefon 2:</b> {phone2}")
+    if not phones_block:
+        phones_block.append("📞 <b>Telefon:</b> —")
+
     return (
-        f"? <b>{title}</b>\n"
-        f"<i>Kontaktlar va manzil ma'lumotlari</i>\n"
-        f"------------------------------\n\n"
-        f"?? <b>Ish vaqti</b>\n"
-        f"? {work_time_text}\n\n"
-        f"?? <b>Manzil</b>\n"
-        f"? {address_text}\n"
-        f"? {region} / {district}\n"
-        f"? {street}\n\n"
-        f"?? <b>Onlayn</b>\n"
-        f"? Telegram: {telegram}\n"
-        f"? Instagram: {instagram}\n"
-        f"? Website: {website}\n"
+        f"ℹ️ <b>{title}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🕒 <b>Ish vaqti</b>\n"
+        f"• {work_time_text}\n\n"
+        f"📍 <b>Manzil</b>\n"
+        f"• {address_text}\n"
+        f"• {region} / {district}\n"
+        f"• {street}\n\n"
+        f"{chr(10).join(phones_block)}\n\n"
+        f"🌐 <b>Onlayn aloqa</b>\n"
+        f"✈️ Telegram: {telegram_show}\n"
+        f"📷 Instagram: {instagram_show}\n"
+        f"🔗 Website: {website_show}\n"
     )
 
 
@@ -123,12 +182,23 @@ def _venue_address(info) -> str:
     street = _safe(getattr(info, "street", None))
     work_time_text = _safe(getattr(info, "work_time_text", None))
 
-    compact = (
-        f"{address_text}\n"
-        f"{region} / {district}\n"
-        f"{street}\n"
-        f"Ish vaqti: {work_time_text}"
-    )
+    lines = []
+    if address_text != "—":
+        lines.append(address_text)
+    if region != "—" or district != "—":
+        if region != "—" and district != "—":
+            lines.append(f"{region} / {district}")
+        else:
+            lines.append(region if region != "—" else district)
+    if street != "—":
+        lines.append(street)
+    if work_time_text != "—":
+        lines.append(f"Ish vaqti: {work_time_text}")
+
+    if not lines:
+        lines.append("Manzil")
+
+    compact = "\n".join(lines)
     # Venue address limitlari qat'iy bo'lishi mumkin ? ehtiyot uchun qisqartiramiz
     return _clip(compact, 240)
 
@@ -169,6 +239,14 @@ def _kb(info, is_venue: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+def _kb_only_back() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Ortga", callback_data="contact:back")]
+        ]
+    )
+
+
 @router.callback_query(F.data == "contact")
 async def open_contact(callback: types.CallbackQuery, state: FSMContext):
     await ensure_info_row()
@@ -192,18 +270,15 @@ async def open_contact(callback: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "contact:map")
 async def show_map_as_single_message(callback: types.CallbackQuery, state: FSMContext):
     """
-    Talab: xarita + info "bitta xabar" bo'lib ko'rinsin.
-    Telegram cheklovi: Location caption olmaydi. Eng to'g'ri yo'l: Venue.
-    Shuning uchun:
-      - info xabarni o'chiramiz
-      - o'rniga Venue yuboramiz (title + address ichida kompakt info)
-      - keyboard venue ostida turadi
+    Talab:
+    "📍 Manzilni xaritada ko‘rish" bosilganda faqat geolokatsiya chiqadi
+    va uning tagida "🔙 Ortga" tugmasi bo'ladi.
     """
     await ensure_info_row()
     info = await get_info()
 
-    lat = getattr(info, "latitude", None)
-    lon = getattr(info, "longitude", None)
+    lat = _parse_coord(getattr(info, "latitude", None))
+    lon = _parse_coord(getattr(info, "longitude", None))
     if lat is None or lon is None:
         await callback.answer("⚠️ Lokatsiya hali kiritilmagan.", show_alert=True)
         return
@@ -211,36 +286,37 @@ async def show_map_as_single_message(callback: types.CallbackQuery, state: FSMCo
     data = await state.get_data()
     is_venue = data.get(_IS_VENUE_KEY, False)
 
-    # Agar allaqachon venue ochiq bo'lsa, qaytadan yubormaymiz
+    # Agar allaqachon xarita ochilgan bo'lsa, qaytadan spam qilmaymiz
     if is_venue:
         await callback.answer("🗺 Xarita allaqachon ochiq.", show_alert=True)
         return
 
-    # Avvalgi info xabarini o'chiramiz (sezilmas darajada)
-    info_msg_id = data.get(_INFO_MSG_ID_KEY) or callback.message.message_id
-    try:
-        await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=int(info_msg_id))
-    except Exception:
-        pass
+    # UI tez javob qaytarsin (spinner qotib qolmasin)
+    await callback.answer("📍 Xarita yuborildi ✅")
 
-    title = _clip(_safe(getattr(info, "title", None)), 100)
-    address = _venue_address(info)
+    # Avvalgi info xabarining id si (odatda shu edit qilingan xabar)
+    old_info_msg_id = data.get(_INFO_MSG_ID_KEY) or callback.message.message_id
 
-    venue_msg = await callback.message.answer_venue(
+    # Eski xabarni fon rejimida olib tashlaymiz (tezkor UX)
+    asyncio.create_task(
+        _safe_delete_or_clear(callback.bot, callback.message.chat.id, old_info_msg_id)
+    )
+
+    # Venue yuboramiz: xarita + nom + kompakt manzil (pro UI)
+    loc_msg = await callback.message.answer_venue(
         latitude=float(lat),
         longitude=float(lon),
-        title=title if title != "—" else "Barbershop",
-        address=address if address != "—" else "Manzil",
-        reply_markup=_kb(info, is_venue=True)
+        title=_display_title(info),
+        address=_venue_address(info),
+        reply_markup=_kb_only_back(),
     )
 
     await state.update_data(**{
-        _LOC_MSG_ID_KEY: venue_msg.message_id,
-        _INFO_MSG_ID_KEY: venue_msg.message_id,
+        _LOC_MSG_ID_KEY: loc_msg.message_id,     # location message id
+        _INFO_MSG_ID_KEY: loc_msg.message_id,    # compatibility uchun
         _IS_VENUE_KEY: True
     })
 
-    await callback.answer("📍 Xarita ochildi ✅")
 
 
 @router.callback_query(F.data == "contact:send_phone1")
@@ -287,13 +363,18 @@ async def contact_back(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     is_venue = data.get(_IS_VENUE_KEY, False)
     msg_id = data.get(_INFO_MSG_ID_KEY)
+    loc_msg_id = data.get(_LOC_MSG_ID_KEY)
 
-    if is_venue and msg_id:
-        # Venue'ni o'chiramiz
-        try:
-            await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=int(msg_id))
-        except Exception:
-            pass
+    if is_venue:
+        # UI darhol javob qaytarsin (spinner qotib qolmasin)
+        await callback.answer("↩️ Ortga qaytildi")
+
+        # Xaritadagi xabarni o'chiramiz
+        target_id = loc_msg_id or msg_id
+        if target_id:
+            asyncio.create_task(
+                _safe_delete_or_clear(callback.bot, callback.message.chat.id, target_id)
+            )
 
         # Oddiy info xabarni qayta yuboramiz (sezilmas darajada)
         await ensure_info_row()
@@ -311,11 +392,15 @@ async def contact_back(callback: types.CallbackQuery, state: FSMContext):
             _IS_VENUE_KEY: False
         })
 
-        await callback.answer()
         return
 
     # Venue yo'q bo'lsa — menu ga qaytish
     await callback.answer()
+    await state.update_data(**{
+        _LOC_MSG_ID_KEY: None,
+        _INFO_MSG_ID_KEY: None,
+        _IS_VENUE_KEY: False
+    })
     await back_to_menu(callback)
 
 
