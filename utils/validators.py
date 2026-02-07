@@ -2,6 +2,8 @@
 import re
 from datetime import datetime, timedelta
 
+INT32_MAX = 2_147_483_647
+
 def validate_fullname(fullname: str) -> bool:
     name_part = r"[A-Za-z\u00C0-\u024F\u02BB\u02BC\u2019'`-]+"
     pattern = rf"{name_part} {name_part}"
@@ -37,6 +39,13 @@ def parse_int_safe(val):
         return int(val)
     except:
         return None
+
+
+def is_int32(value: int) -> bool:
+    try:
+        return isinstance(value, int) and -2_147_483_648 <= value <= INT32_MAX
+    except Exception:
+        return False
 
 
 def parse_user_date(raw_text: str) -> str | None:

@@ -1,10 +1,10 @@
-﻿# handlers/contact.py
+﻿# handlers/info.py
 import re
 import asyncio
 from aiogram import Router, types, F, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-from sql.db_contacts import ensure_info_row, get_info
+from sql.db_info import ensure_info_row, get_info
 from handlers.back import back_to_menu
 
 router = Router()
@@ -405,5 +405,5 @@ async def contact_back(callback: types.CallbackQuery, state: FSMContext):
 
 
 # Backward compatibility (old bot.py may import contact.contact)
-contact = router
+info = router
 

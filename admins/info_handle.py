@@ -6,7 +6,8 @@ from sqlalchemy import select
 
 from sql.db import async_session
 from sql.models import Admins
-from sql.db_contacts import ensure_info_row, get_info, update_info_field
+from sql.db_info import ensure_info_row, get_info, update_info_field
+from .admin_buttons import INFO_ADD_CB, INFO_EDIT_CB
 
 router = Router()
 
@@ -71,7 +72,7 @@ def _info_preview_text(info) -> str:
     )
 
 
-@router.message(F.text.in_(["ℹ️ Kontakt/Info kiritish", "✏️ Kontakt/Info tahrirlash"]))
+@router.message(F.text.in_(["ℹ️ Info", "ℹ️ Kontakt/Info kiritish", "✏️ Kontakt/Info tahrirlash"]))
 async def open_info_editor(message: types.Message):
     if not await _is_admin(message):
         return await message.answer("⛔ Bu bo'lim faqat adminlar uchun.")
@@ -79,6 +80,19 @@ async def open_info_editor(message: types.Message):
     await ensure_info_row()
     info = await get_info()
     await message.answer(_info_preview_text(info), reply_markup=_edit_keyboard())
+
+
+@router.callback_query(F.data.in_({INFO_ADD_CB, INFO_EDIT_CB}))
+async def open_info_editor_from_menu(callback: types.CallbackQuery, state: FSMContext):
+    if not await _is_admin_cb(callback):
+        await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+
+    await state.clear()
+    await ensure_info_row()
+    info = await get_info()
+    await callback.message.edit_text(_info_preview_text(info), reply_markup=_edit_keyboard())
+    await callback.answer()
 
 
 @router.callback_query(F.data == "info_back")

@@ -50,6 +50,8 @@ class Admins(Base):
     tg_id = Column(BigInteger, unique=True, nullable=False, index=True)
     admin_fullname = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
+    username = Column(String(100), nullable=True)
+
 
 #Barberlar
 class Barbers(Base):
@@ -135,7 +137,7 @@ class BarberOrderInbox(Base):
     # Barberga telegramda yuborildimi?
     is_delivered = Column(Boolean, default=False)
 
-    # Barber ko‘rdimi? (detail bosdi yoki yopdi)
+    # Barber koï¿½rdimi? (detail bosdi yoki yopdi)
     is_seen = Column(Boolean, default=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

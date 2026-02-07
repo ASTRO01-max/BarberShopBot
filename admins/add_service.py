@@ -5,11 +5,27 @@ from aiogram.filters import StateFilter
 from sqlalchemy.future import select
 
 from utils.states import AdminStates
+from utils.validators import INT32_MAX
 from sql.models import Services
 from sql.db import async_session
 from utils.emoji_map import SERVICE_EMOJIS
+from .admin_buttons import get_service_inline_actions_kb
 
 router = Router()
+
+
+@router.message(
+    StateFilter(
+        AdminStates.adding_service,
+        AdminStates.adding_service_price,
+        AdminStates.adding_service_duration,
+        AdminStates.adding_service_photo,
+    ),
+    F.text.startswith("/cancel"),
+)
+async def cancel_add_service(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Xizmat qo'shish bekor qilindi.", reply_markup=get_service_inline_actions_kb())
 
 
 @router.message(F.text == "💈 Servis qo'shish")
@@ -38,10 +54,17 @@ async def save_service_name(message: types.Message, state: FSMContext):
 
 @router.message(StateFilter(AdminStates.adding_service_price))
 async def save_service_price(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
+    text = (message.text or "").strip()
+    if not text.isdigit():
         return await message.answer("❌ Narx faqat raqam bo‘lishi kerak. Qayta kiriting:")
 
-    await state.update_data(price=int(message.text.strip()))
+    price = int(text)
+    if price > INT32_MAX:
+        return await message.answer(
+            f"❌ Narx juda katta. Maksimal qiymat: {INT32_MAX}. Qayta kiriting:"
+        )
+
+    await state.update_data(price=price)
     await state.set_state(AdminStates.adding_service_duration)
     await message.answer("⏰ Xizmat davomiyligini kiriting (masalan: 30 daqiqa):")
 

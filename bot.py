@@ -12,7 +12,7 @@ from handlers import (
     start,
     services,
     barbers,
-    contact,
+    info,
     booking,
     back,
     support,
@@ -76,7 +76,7 @@ dp.callback_query.register(
 
 
 # Bog‘lanish uchun
-dp.include_router(contact.router)
+dp.include_router(info.router)
 
 
 dp.callback_query.register(

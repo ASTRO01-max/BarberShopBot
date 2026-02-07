@@ -1,4 +1,4 @@
-# sql/db_contacts.py
+# sql/db_info.py
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sql.db import async_session

@@ -1,3 +1,4 @@
+# admins/add_barbers.py
 from datetime import date
 from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
@@ -8,8 +9,27 @@ from sqlalchemy import select
 from sql.db import async_session
 from sql.models import Barbers, OrdinaryUser, BarberPhotos
 from utils.states import AdminStates
+from .admin_buttons import get_barber_inline_actions_kb
 
 router = Router()
+
+
+@router.message(
+    StateFilter(
+        AdminStates.adding_barber_fullname,
+        AdminStates.adding_barber_phone,
+        AdminStates.adding_barber_experience,
+        AdminStates.adding_barber_work_days,
+        AdminStates.adding_barber_work_time,
+        AdminStates.adding_barber_breakdown,
+        AdminStates.adding_photo_choice,
+        AdminStates.adding_barber_photo,
+    ),
+    F.text.startswith("/cancel"),
+)
+async def cancel_add_barber(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Barber qo'shish bekor qilindi.", reply_markup=get_barber_inline_actions_kb())
 
 
 def _parse_time_range(text: str):
