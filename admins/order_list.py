@@ -22,6 +22,7 @@ CHECK_JUMP10_CB = "orders_jump10"
 CHECK_GOTO_CB = "orders_goto"
 CHECK_SEARCH_MODE_CB = "orders_search_mode"
 CHECK_BACK_CB = "orders_back_to_pagination"
+BACK_TO_LIST_CB = "orders_back_to_list"
 
 MODE_VIEW = "view"
 MODE_EDIT = "edit"
@@ -166,6 +167,24 @@ def _resolve_mode_from_callback(data: str, default_mode: str = MODE_VIEW) -> str
     return default_mode
 
 
+async def _clear_orders_pagination_state(state: FSMContext):
+    keys_to_remove = {
+        "orders_mode",
+        "orders_current_page",
+        "orders_total_orders",
+        "orders_total_pages",
+        "orders_search_mode",
+        "check_current_page",
+        "check_total_orders",
+        "check_total_pages",
+        "check_search_mode",
+    }
+    data = await state.get_data()
+    for key in keys_to_remove:
+        data.pop(key, None)
+    await state.set_data(data)
+
+
 def _build_check_orders_keyboard(
     page: int,
     total_pages: int,
@@ -177,63 +196,61 @@ def _build_check_orders_keyboard(
 
     rows = []
 
-
-    if total_pages <= 1:
-        return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-
-    nav_row = []
-    if page > 1:
-        nav_row.append(
-            InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"{callbacks['page']}:{page - 1}")
-        )
-    if page < total_pages:
-        nav_row.append(
-            InlineKeyboardButton(text="➡️  Keyingi", callback_data=f"{callbacks['page']}:{page + 1}")
-        )
-    if nav_row:
-        rows.append(nav_row)
-
-    if not search_mode:
-        jump_row = []
-        if total_pages > 5 and page > 5:
-            jump_row.append(
-                InlineKeyboardButton(text="⬅️ 5", callback_data=f"{callbacks['jump5']}:{page - 5}")
-            )
-        if total_pages > 5 and page + 5 <= total_pages:
-            jump_row.append(
-                InlineKeyboardButton(text="5 ➡️", callback_data=f"{callbacks['jump5']}:{page + 5}")
-            )
-        if total_pages > 10 and page > 10:
-            jump_row.append(
-                InlineKeyboardButton(text="⬅️ 10", callback_data=f"{callbacks['jump10']}:{page - 10}")
-            )
-        if total_pages > 10 and page + 10 <= total_pages:
-            jump_row.append(
-                InlineKeyboardButton(text="10 ➡️", callback_data=f"{callbacks['jump10']}:{page + 10}")
-            )
-        if jump_row:
-            rows.append(jump_row)
-
-        rows.append([InlineKeyboardButton(text="🔍", callback_data=callbacks["search_mode"])])
-
     if mode == MODE_EDIT and order_id is not None:
         rows.append(
             [InlineKeyboardButton(text="❌ O'chirish", callback_data=f"{EDIT_DELETE_CB}:{order_id}")]
         )
-        
-    if search_mode:
-        pages = _page_window(page, total_pages, window=20)
-        page_rows = []
-        row = []
-        for p in pages:
-            row.append(InlineKeyboardButton(text=str(p), callback_data=f"{callbacks['goto']}:{p}"))
-            if len(row) == 10:
+
+    if total_pages > 1:
+        nav_row = []
+        if page > 1:
+            nav_row.append(
+                InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"{callbacks['page']}:{page - 1}")
+            )
+        if page < total_pages:
+            nav_row.append(
+                InlineKeyboardButton(text="➡️  Keyingi", callback_data=f"{callbacks['page']}:{page + 1}")
+            )
+        if nav_row:
+            rows.append(nav_row)
+
+        if not search_mode:
+            jump_row = []
+            if total_pages > 5 and page > 5:
+                jump_row.append(
+                    InlineKeyboardButton(text="⬅️ 5", callback_data=f"{callbacks['jump5']}:{page - 5}")
+                )
+            if total_pages > 5 and page + 5 <= total_pages:
+                jump_row.append(
+                    InlineKeyboardButton(text="5 ➡️", callback_data=f"{callbacks['jump5']}:{page + 5}")
+                )
+            if total_pages > 10 and page > 10:
+                jump_row.append(
+                    InlineKeyboardButton(text="⬅️ 10", callback_data=f"{callbacks['jump10']}:{page - 10}")
+                )
+            if total_pages > 10 and page + 10 <= total_pages:
+                jump_row.append(
+                    InlineKeyboardButton(text="10 ➡️", callback_data=f"{callbacks['jump10']}:{page + 10}")
+                )
+            if jump_row:
+                rows.append(jump_row)
+
+            rows.append([InlineKeyboardButton(text="🔍", callback_data=callbacks["search_mode"])])
+
+        if search_mode:
+            pages = _page_window(page, total_pages, window=20)
+            page_rows = []
+            row = []
+            for p in pages:
+                row.append(InlineKeyboardButton(text=str(p), callback_data=f"{callbacks['goto']}:{p}"))
+                if len(row) == 10:
+                    page_rows.append(row)
+                    row = []
+            if row:
                 page_rows.append(row)
-                row = []
-        if row:
-            page_rows.append(row)
-        rows.extend(page_rows)
-        rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=callbacks["back"])])
+            rows.extend(page_rows)
+
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=BACK_TO_LIST_CB)])
 
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
@@ -424,6 +441,16 @@ async def orders_check_callback(callback: types.CallbackQuery, state: FSMContext
         check_total_pages=total_pages,
         check_search_mode=False,
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == BACK_TO_LIST_CB)
+async def orders_back_to_list_callback(callback: types.CallbackQuery, state: FSMContext):
+    page = 0
+    response, markup, total = await get_orders_page(page)
+    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
+    await _clear_orders_pagination_state(state)
+    await state.update_data(current_page=page, total_orders=total)
     await callback.answer()
 
 
