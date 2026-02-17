@@ -12,15 +12,41 @@ from aiogram.fsm.context import FSMContext
 from keyboards import booking_keyboards
 from keyboards.main_menu import get_main_menu
 from keyboards.main_buttons import phone_request_keyboard, get_dynamic_main_keyboard
-from sql.db_users_utils import get_user
+from sql.db_users_utils import get_user, save_user
 from sql.db_order_utils import get_booked_times, save_order
 from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.states import UserState
+from aiogram.filters import StateFilter
 from utils.validators import parse_user_date
 
 logger = logging.getLogger(__name__)
 router = Router()
 
+CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
+
+
+def with_cancel_hint(text: str) -> str:
+    return f"{text}{CANCEL_HINT}"
+
+
+@router.message(
+    StateFilter(
+        UserState.waiting_for_fullname,
+        UserState.waiting_for_phonenumber,
+        UserState.waiting_for_service,
+        UserState.waiting_for_barber,
+        UserState.waiting_for_date,
+        UserState.waiting_for_time,        
+    ),
+    F.text.startswith("/cancel"),
+)
+
+async def cancel_booking(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "❌ Navbat olish jarayoni bekor qilindi.\n\n🏠 Asosiy menyuga qaytdingiz.",
+        reply_markup=get_main_menu(),
+    )
 
 # --- 1-qadam: Boshlash ---
 async def start_booking(callback: CallbackQuery, state: FSMContext):
@@ -30,12 +56,12 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
     if user:
         if callback.message.photo:
             await callback.message.edit_caption(
-                caption="💈 Xizmat turini tanlang:",
+                caption=with_cancel_hint("💈 Xizmat turini tanlang:"),
                 reply_markup=await booking_keyboards.service_keyboard()
             )
         else:
             await callback.message.edit_text(
-                "💈 Xizmat turini tanlang:",
+                with_cancel_hint("💈 Xizmat turini tanlang:"),
                 reply_markup=await booking_keyboards.service_keyboard()
             )
 
@@ -44,11 +70,11 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
     else:
         if callback.message.photo:
             await callback.message.edit_caption(
-                caption="Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+                caption=with_cancel_hint("Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):")
             )
         else:
             await callback.message.edit_text(
-                "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+                with_cancel_hint("Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):")
             )
 
         await state.set_state(UserState.waiting_for_fullname)
@@ -67,7 +93,7 @@ async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
     user = await get_user(user_id)
 
     if user:
-        text = "💈 Xizmat turini tanlang:"
+        text = with_cancel_hint("💈 Xizmat turini tanlang:")
         keyboard = await booking_keyboards.service_keyboard()
 
         if callback.message.photo:
@@ -79,7 +105,7 @@ async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
         await callback.answer("🧑‍🎤 Barber tanlandi, navbat boshlandi ✅")
 
     else:
-        text = "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+        text = with_cancel_hint("Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):")
 
         if callback.message.photo:
             await callback.message.edit_caption(caption=text)
@@ -102,7 +128,7 @@ async def start_booking_from_service(callback: CallbackQuery, state: FSMContext)
     user = await get_user(user_id)
 
     if user:
-        text = "💈 Barberni tanlang:"
+        text = with_cancel_hint("💈 Barberni tanlang:")
         keyboard = await booking_keyboards.barber_keyboard(service_id)
 
         if callback.message.photo:
@@ -114,7 +140,7 @@ async def start_booking_from_service(callback: CallbackQuery, state: FSMContext)
         await callback.answer("💈 Xizmat tanlandi, navbat boshlandi ✅")
 
     else:
-        text = "Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):"
+        text = with_cancel_hint("Iltimos, to‘liq ismingizni kiriting (masalan: Aliyev Valijon):")
 
         if callback.message.photo:
             await callback.message.edit_caption(caption=text)
@@ -133,14 +159,14 @@ async def process_fullname(message: Message, state: FSMContext):
 
     if len(fullname.split()) < 2:
         await message.answer(
-            "❗ Iltimos, ism va familiyani to‘liq kiriting (masalan: Aliyev Valijon)."
+            with_cancel_hint("❗ Iltimos, ism va familiyani to‘liq kiriting (masalan: Aliyev Valijon).")
         )
         return
 
     await state.update_data(fullname=fullname)
 
     await message.answer(
-        "📱 Iltimos, telefon raqamingizni kiriting yoki tugma orqali yuboring:",
+        with_cancel_hint("📱 Iltimos, telefon raqamingizni kiriting yoki tugma orqali yuboring:"),
         reply_markup=phone_request_keyboard
     )
 
@@ -157,7 +183,7 @@ async def process_phonenumber(message: Message, state: FSMContext):
         raw_phone = message.text.strip()
 
     if not raw_phone:
-        await message.answer("❌ Iltimos, telefon raqamini yuboring (masalan: +998901234567).")
+        await message.answer(with_cancel_hint("❌ Iltimos, telefon raqamini yuboring (masalan: +998901234567)."))
         return
 
     digits = re.sub(r"\D", "", raw_phone)
@@ -172,7 +198,9 @@ async def process_phonenumber(message: Message, state: FSMContext):
         phonenumber = None
 
     if not phonenumber or not phonenumber.startswith("+998") or len(phonenumber) != 13:
-        await message.answer("❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567).")
+        await message.answer(
+            with_cancel_hint("❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567).")
+        )
         return
 
     data = await state.get_data()
@@ -186,7 +214,7 @@ async def process_phonenumber(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "💈 Endi xizmat turini tanlang:",
+        with_cancel_hint("💈 Endi xizmat turini tanlang:"),
         reply_markup=await booking_keyboards.service_keyboard()
     )
 
@@ -206,12 +234,12 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
         if callback.message.photo:
             await callback.message.edit_caption(
-                caption="📅 Sana tanlang:",
+                caption=with_cancel_hint("📅 Sana tanlang:"),
                 reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
             )
         else:
             await callback.message.edit_text(
-                "📅 Sana tanlang:",
+                with_cancel_hint("📅 Sana tanlang:"),
                 reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
             )
 
@@ -221,12 +249,12 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
     if callback.message.photo:
         await callback.message.edit_caption(
-            caption="💈 Barberni tanlang:",
+            caption=with_cancel_hint("💈 Barberni tanlang:"),
             reply_markup=await booking_keyboards.barber_keyboard(service_id)
         )
     else:
         await callback.message.edit_text(
-            "💈 Barberni tanlang:",
+            with_cancel_hint("💈 Barberni tanlang:"),
             reply_markup=await booking_keyboards.barber_keyboard(service_id)
         )
 
@@ -245,12 +273,12 @@ async def book_step2(callback: CallbackQuery, state: FSMContext):
 
     if callback.message.photo:
         await callback.message.edit_caption(
-            caption="📅 Sana tanlang:",
+            caption=with_cancel_hint("📅 Sana tanlang:"),
             reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
         )
     else:
         await callback.message.edit_text(
-            "📅 Sana tanlang:",
+            with_cancel_hint("📅 Sana tanlang:"),
             reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
         )
 
@@ -279,23 +307,23 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
 
         if callback.message.photo:
             await callback.message.edit_caption(
-                caption="❌ Kechirasiz, bu kunga barcha vaqtlar band.",
+                caption=with_cancel_hint("❌ Kechirasiz, bu kunga barcha vaqtlar band."),
                 reply_markup=back_markup
             )
         else:
             await callback.message.edit_text(
-                "❌ Kechirasiz, bu kunga barcha vaqtlar band.",
+                with_cancel_hint("❌ Kechirasiz, bu kunga barcha vaqtlar band."),
                 reply_markup=back_markup
             )
     else:
         if callback.message.photo:
             await callback.message.edit_caption(
-                caption="⏰ Vaqt tanlang:",
+                caption=with_cancel_hint("⏰ Vaqt tanlang:"),
                 reply_markup=keyboard
             )
         else:
             await callback.message.edit_text(
-                "⏰ Vaqt tanlang:",
+                with_cancel_hint("⏰ Vaqt tanlang:"),
                 reply_markup=keyboard
             )
 
@@ -312,7 +340,7 @@ async def book_step3_message(message: Message, state: FSMContext):
 
     if not date:
         await message.answer(
-            "❌ Kechirasiz, biz faqat joriy oy ichidagi sanalarni qabul qilamiz."
+            with_cancel_hint("❌ Kechirasiz, biz faqat joriy oy ichidagi sanalarni qabul qilamiz.")
         )
         return
 
@@ -326,10 +354,10 @@ async def book_step3_message(message: Message, state: FSMContext):
     )
 
     if keyboard is None:
-        await message.answer("❌ Bu kunda bo‘sh vaqt yo‘q.")
+        await message.answer(with_cancel_hint("❌ Bu kunda bo‘sh vaqt yo‘q."))
         return
 
-    await message.answer("⏰ Vaqtni tanlang:", reply_markup=keyboard)
+    await message.answer(with_cancel_hint("⏰ Vaqtni tanlang:"), reply_markup=keyboard)
     await state.set_state(UserState.waiting_for_time)
 
 
@@ -339,12 +367,12 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
 
     if callback.message.photo:
         await callback.message.edit_caption(
-            caption="📅 Sana tanlang:",
+            caption=with_cancel_hint("📅 Sana tanlang:"),
             reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
         )
     else:
         await callback.message.edit_text(
-            "📅 Sana tanlang:",
+            with_cancel_hint("📅 Sana tanlang:"),
             reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id)
         )
 
@@ -393,6 +421,19 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     fullname = fullname or "Noma'lum"
     phone = phone or "Noma'lum"
 
+    # Faqat to'liq ma'lumot bo'lsa users jadvaliga upsert qilamiz.
+    if fullname != "Noma'lum" and phone != "Noma'lum":
+        saved_user = await save_user(
+            {
+                "tg_id": user_id,
+                "fullname": fullname,
+                "phone": phone,
+            }
+        )
+        if saved_user:
+            fullname = saved_user.fullname or fullname
+            phone = saved_user.phone or phone
+
     # 4️⃣ Buyurtmani DB ga saqlash
     order = {
         "user_id": user_id,
@@ -435,6 +476,10 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer("⏰ Vaqt tanlandi ✅")
+    await callback.message.answer(
+        "📱 Menyu yangilandi:",
+        reply_markup=await get_dynamic_main_keyboard(user_id),
+    )
     await callback.message.answer(
         "🏠 Asosiy menyu:",
         reply_markup=get_main_menu()

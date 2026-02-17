@@ -132,6 +132,23 @@ dp.callback_query.register(
     lambda c: c.data == "back"
 )
 
+# FSM - Booking bekor qilish (/cancel)
+BOOKING_CANCEL_STATES = (
+    booking.UserState.waiting_for_fullname,
+    booking.UserState.waiting_for_phonenumber,
+    booking.UserState.waiting_for_service,
+    booking.UserState.waiting_for_barber,
+    booking.UserState.waiting_for_date,
+    booking.UserState.waiting_for_time,
+)
+
+for booking_state in BOOKING_CANCEL_STATES:
+    dp.message.register(
+        booking.cancel_booking,
+        booking_state,
+        F.text.startswith("/cancel"),
+    )
+
 # FSM - To‘liq ism qadam
 dp.message.register(
     booking.process_fullname,

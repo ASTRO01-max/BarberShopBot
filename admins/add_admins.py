@@ -1,6 +1,6 @@
 # admins/add_admins.py
 from aiogram import Router, types, F
-from aiogram.filters import StateFilter
+from aiogram.filters import StateFilter, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, or_
@@ -17,10 +17,25 @@ from .admin_buttons import (
 
 router = Router()
 
+CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
+
+
+def with_cancel_hint(text: str) -> str:
+    return f"{text}{CANCEL_HINT}"
+
 
 class AdminManageState(StatesGroup):
     adding_lookup = State()
     adding_phone = State()
+
+
+@router.message(
+    StateFilter(AdminManageState.adding_lookup, AdminManageState.adding_phone),
+    Command("cancel"),
+)
+async def cancel_add_admin(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Jarayon bekor qilindi.", reply_markup=get_admin_inline_actions_kb())
 
 
 @router.message(F.text == ADMIN_MENU_TEXT)
@@ -34,7 +49,7 @@ async def start_add_admin(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(AdminManageState.adding_lookup)
     await callback.message.answer(
-        "Adminning to'liq ismini yoki @username ni kiriting:",
+        with_cancel_hint("Adminning to'liq ismini yoki @username ni kiriting:"),
         reply_markup=get_admin_cancel_kb(),
     )
     await callback.answer()
@@ -52,7 +67,7 @@ async def add_admin_lookup(message: types.Message, state: FSMContext):
     text = (message.text or "").strip()
     if not text:
         return await message.answer(
-            "Iltimos, to'liq ism yoki @username kiriting.",
+            with_cancel_hint("Iltimos, to'liq ism yoki @username kiriting."),
             reply_markup=get_admin_cancel_kb(),
         )
 
@@ -109,14 +124,14 @@ async def add_admin_lookup(message: types.Message, state: FSMContext):
 
         if not user:
             return await message.answer(
-                "Oddiy foydalanuvchi topilmadi. Qayta kiriting:",
+                with_cancel_hint("Oddiy foydalanuvchi topilmadi. Qayta kiriting:"),
                 reply_markup=get_admin_cancel_kb(),
             )
 
         existing = await session.execute(select(Admins).where(Admins.tg_id == user.tg_id))
         if existing.scalars().first():
             return await message.answer(
-                "Admin allaqachon mavjud.",
+                with_cancel_hint("Admin allaqachon mavjud."),
                 reply_markup=get_admin_cancel_kb(),
             )
 
@@ -134,7 +149,7 @@ async def add_admin_lookup(message: types.Message, state: FSMContext):
         await state.set_state(AdminManageState.adding_phone)
 
     await message.answer(
-        "Adminning telefon raqamini kiriting:",
+        with_cancel_hint("Adminning telefon raqamini kiriting:"),
         reply_markup=get_admin_cancel_kb(),
     )
 
@@ -144,7 +159,7 @@ async def add_admin_phone(message: types.Message, state: FSMContext):
     phone = (message.text or "").strip()
     if not phone:
         return await message.answer(
-            "Telefon raqamini kiriting:",
+            with_cancel_hint("Telefon raqamini kiriting:"),
             reply_markup=get_admin_cancel_kb(),
         )
 
