@@ -12,13 +12,11 @@ router = Router()
 
 SPECIAL_MSG_ADMINS_CB = "special_msg_admins"
 SPECIAL_MSG_BARBERS_CB = "special_msg_barbers"
-SPECIAL_MSG_USERS_CB = "special_msg_users"
 SPECIAL_MSG_ALL_CB = "special_msg_all"
 
 SPECIAL_MSG_TARGET_LABELS = {
     SPECIAL_MSG_ADMINS_CB: "Adminlar",
     SPECIAL_MSG_BARBERS_CB: "Barberlar",
-    SPECIAL_MSG_USERS_CB: "Foydalanuvchilar",
     SPECIAL_MSG_ALL_CB: "Hamma",
 }
 
@@ -28,7 +26,6 @@ def _broadcast_target_kb() -> types.InlineKeyboardMarkup:
         inline_keyboard=[
             [types.InlineKeyboardButton(text="Adminlar uchun", callback_data=SPECIAL_MSG_ADMINS_CB)],
             [types.InlineKeyboardButton(text="Barberlar uchun", callback_data=SPECIAL_MSG_BARBERS_CB)],
-            [types.InlineKeyboardButton(text="Foydalanuvchilar uchun", callback_data=SPECIAL_MSG_USERS_CB)],
             [types.InlineKeyboardButton(text="Hamma uchun", callback_data=SPECIAL_MSG_ALL_CB)],
         ]
     )
@@ -53,9 +50,6 @@ async def _resolve_target_tg_ids(target: str) -> set[int]:
             tg_ids.update(await _fetch_tg_ids(session, Admins))
         elif target == SPECIAL_MSG_BARBERS_CB:
             tg_ids.update(await _fetch_tg_ids(session, Barbers))
-        elif target == SPECIAL_MSG_USERS_CB:
-            tg_ids.update(await _fetch_tg_ids(session, User))
-            tg_ids.update(await _fetch_tg_ids(session, OrdinaryUser))
         elif target == SPECIAL_MSG_ALL_CB:
             tg_ids.update(await _fetch_tg_ids(session, Admins))
             tg_ids.update(await _fetch_tg_ids(session, Barbers))
@@ -82,7 +76,6 @@ async def start_broadcast(message: types.Message, state: FSMContext):
         {
             SPECIAL_MSG_ADMINS_CB,
             SPECIAL_MSG_BARBERS_CB,
-            SPECIAL_MSG_USERS_CB,
             SPECIAL_MSG_ALL_CB,
         }
     )

@@ -94,12 +94,48 @@ dp.include_router(main_btn_router)
 
 # FSM - Xizmat tanlash
 dp.callback_query.register(
+    booking.booking_service_nav,
+    booking.UserState.waiting_for_service,
+    F.data.startswith("booksrv_next_")
+)
+
+dp.callback_query.register(
+    booking.booking_service_nav,
+    booking.UserState.waiting_for_service,
+    F.data.startswith("booksrv_prev_")
+)
+
+dp.callback_query.register(
+    booking.booking_service_pick,
+    booking.UserState.waiting_for_service,
+    F.data.startswith("booksrv_pick_")
+)
+
+dp.callback_query.register(
     booking.book_step1,
     booking.UserState.waiting_for_service,
     F.data.startswith("service_")
 )
 
 # FSM - Usta tanlash
+dp.callback_query.register(
+    booking.booking_barber_nav,
+    booking.UserState.waiting_for_barber,
+    F.data.startswith("bookbar_next_")
+)
+
+dp.callback_query.register(
+    booking.booking_barber_nav,
+    booking.UserState.waiting_for_barber,
+    F.data.startswith("bookbar_prev_")
+)
+
+dp.callback_query.register(
+    booking.booking_barber_pick,
+    booking.UserState.waiting_for_barber,
+    F.data.startswith("bookbar_pick_")
+)
+
 dp.callback_query.register(
     booking.book_step2,
     booking.UserState.waiting_for_barber,

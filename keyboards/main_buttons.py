@@ -12,7 +12,7 @@ phone_request_keyboard = ReplyKeyboardMarkup(
 
 cancel_order_btn = KeyboardButton(text="❌ Buyurtmani bekor qilish")
 order_history_btn = KeyboardButton(text="🗂 Buyurtmalar tarixi")
-user_database_btn = KeyboardButton(text="📥 Foydalanuvchi bazasi")
+user_database_btn = KeyboardButton(text="📥 Foydalanuvchi ma'lumotlari")
 
 
 async def get_dynamic_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:

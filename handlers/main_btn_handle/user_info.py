@@ -1,15 +1,15 @@
-#handlers/main_btn_handle/user_info.py
+﻿# handlers/main_btn_handle/user_info.py
 import re
 from typing import Optional
 
 from aiogram import F, Router, types
-from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+
 from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyboard
 from keyboards.main_menu import get_main_menu
-from sql.db_users_utils import save_user, delete_user, update_user, get_user
-from utils.states import UserState, UserForm
+from sql.db_users_utils import delete_user, get_user, save_user, update_user
+from utils.states import UserForm, UserState
 from utils.validators import validate_fullname, validate_phone
 
 router = Router()
@@ -18,7 +18,7 @@ router = Router()
 def get_user_database_inline_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Ma'lumotlarini o‘chirish", callback_data="user_delete")],
+            [InlineKeyboardButton(text="❌ Ma'lumotlarini o'chirish", callback_data="user_delete")],
             [InlineKeyboardButton(text="📥 Ma'lumotlarini o'zgartirish", callback_data="user_edit")],
         ]
     )
@@ -41,15 +41,16 @@ def _normalize_phone(phone_raw: Optional[str]) -> Optional[str]:
 @router.message(F.text.in_({"📥Foydalanuvchini saqlash", "📥 Foydalanuvchini saqlash"}))
 async def ask_fullname(message: types.Message, state: FSMContext):
     await state.set_state(UserForm.fullname)
-    await message.answer("👤 To‘liq ismingizni kiriting:")
+    await message.answer("👤 To'liq ismingizni kiriting:")
 
 
 @router.message(UserForm.fullname)
 async def process_fullname(message: types.Message, state: FSMContext):
     fullname = (message.text or "").strip()
     if not validate_fullname(fullname):
-        await message.answer("❌ Ism noto‘g‘ri formatda.")
+        await message.answer("❌ Ism noto'g'ri formatda.")
         return
+
     await state.update_data(fullname=fullname)
     await state.set_state(UserForm.phone)
     await message.answer("📞 Telefon raqamingizni kiriting (+998 bilan)")
@@ -68,14 +69,14 @@ async def process_phone(message: types.Message, state: FSMContext):
         phone_raw = message.text.strip()
     else:
         await message.answer(
-            "📱 Iltimos telefon raqamingizni yuboring — matn sifatida (+998901234567) yoki 'Kontakt yuborish' tugmasi orqali."
+            "📱 Iltimos telefon raqamingizni yuboring - matn sifatida (+998901234567) yoki 'Kontakt yuborish' tugmasi orqali."
         )
         return
 
     normalized = _normalize_phone(phone_raw)
     if not normalized or not validate_phone(normalized):
         await message.answer(
-            "❌ Telefon raqami noto‘g‘ri. Iltimos +998901234567 formatida yuboring yoki Kontakt yuboring."
+            "❌ Telefon raqami noto'g'ri. Iltimos +998901234567 formatida yuboring yoki Kontakt yuboring."
         )
         return
 
@@ -91,14 +92,14 @@ async def process_phone(message: types.Message, state: FSMContext):
 
     saved = await save_user(payload)
     if not saved:
-        await message.answer("❌ Ma'lumotlarni saqlashda xatolik yuz berdi. Iltimos, keyinroq urinib ko‘ring.")
+        await message.answer("❌ Ma'lumotlarni saqlashda xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring.")
         return
 
     await state.clear()
     keyboard = await get_dynamic_main_keyboard(message.from_user.id)
 
     await message.answer(
-        f"✅ Ma’lumotlar saqlandi!\n\n👤 Ism: {saved.fullname or fullname}\n📞 Tel: {saved.phone}",
+        f"✅ Ma'lumotlar saqlandi!\n\n👤 Ism: {saved.fullname or fullname}\n📞 Tel: {saved.phone}",
         reply_markup=keyboard,
     )
     await message.answer(
@@ -108,7 +109,7 @@ async def process_phone(message: types.Message, state: FSMContext):
     )
 
 
-@router.message(F.text.in_({"📥 Foydalanuvchi bazasi", "📥Foydalanuvchi bazasi"}))
+@router.message(F.text.in_({"📥 Foydalanuvchi ma'lumotlari", "📥Foydalanuvchi ma'lumotlari"}))
 async def show_user_database_actions(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     if not user:
@@ -117,10 +118,25 @@ async def show_user_database_actions(message: Message, state: FSMContext):
         return
 
     await state.clear()
+    fullname = user.fullname or "Kiritilmagan"
+    phone = user.phone or "Kiritilmagan"
+    user_db_id = user.id if user.id is not None else "Kiritilmagan"
+    user_tg_id = user.tg_id if user.tg_id is not None else message.from_user.id
+
     await message.answer(
+        "📄 Foydalanuvchi ma'lumotlari:\n\n"
+        f"🆔 ID: {user_db_id}\n"
+        f"🆔 Telegram ID: {user_tg_id}\n"
+        f"👤 To'liq ism: {fullname}\n"
+        f"📞 Telefon: {phone}\n\n"
         "Quyidagi amallardan birini tanlang:",
         reply_markup=get_user_database_inline_keyboard(),
     )
+
+    # await message.answer(
+    #     "Quyidagi amallardan birini tanlang:",
+    #     reply_markup=get_user_database_inline_keyboard(),
+    # )
 
 
 @router.callback_query(F.data == "user_delete")
@@ -132,7 +148,7 @@ async def delete_user_data_inline(callback: types.CallbackQuery, state: FSMConte
 
     if deleted:
         await callback.message.answer(
-            "🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o‘chirildi!",
+            "🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o'chirildi!",
             reply_markup=keyboard,
         )
     else:
@@ -155,7 +171,7 @@ async def start_user_edit_inline(callback: types.CallbackQuery, state: FSMContex
         return
 
     await state.set_state(UserState.waiting_for_new_fullname)
-    await callback.message.answer("✏️ Yangi to‘liq ismingizni kiriting:")
+    await callback.message.answer("✏️ Yangi to'liq ismingizni kiriting:")
     await callback.answer()
 
 
@@ -163,7 +179,7 @@ async def start_user_edit_inline(callback: types.CallbackQuery, state: FSMContex
 async def process_new_fullname(message: Message, state: FSMContext):
     new_fullname = (message.text or "").strip()
     if not validate_fullname(new_fullname):
-        await message.answer("❌ Ism noto‘g‘ri formatda.")
+        await message.answer("❌ Ism noto'g'ri formatda.")
         return
 
     await state.update_data(new_fullname=new_fullname)
@@ -184,13 +200,13 @@ async def process_new_phone(message: types.Message, state: FSMContext):
         phone_raw = message.text.strip()
     else:
         await message.answer(
-            "📱 Iltimos, telefon raqamingizni yuboring — matn sifatida (+998901234567) yoki 'Kontakt yuborish' tugmasi orqali."
+            "📱 Iltimos, telefon raqamingizni yuboring - matn sifatida (+998901234567) yoki 'Kontakt yuborish' tugmasi orqali."
         )
         return
 
     normalized_phone = _normalize_phone(phone_raw)
     if not normalized_phone or not validate_phone(normalized_phone):
-        await message.answer("❌ Iltimos, telefon raqamini to‘g‘ri kiriting (masalan: +998901234567).")
+        await message.answer("❌ Iltimos, telefon raqamini to'g'ri kiriting (masalan: +998901234567).")
         return
 
     user_data = await state.get_data()
@@ -219,16 +235,15 @@ async def process_new_phone(message: types.Message, state: FSMContext):
     )
 
 
-@router.message(F.text == "❌ Foydalanuvchi ma'lumotlarini o‘chirish")
+@router.message(F.text == "❌ Foydalanuvchi ma'lumotlarini o'chirish")
 async def delete_user_data(message: types.Message):
     user_id = message.from_user.id
     deleted = await delete_user(user_id)
     keyboard = await get_dynamic_main_keyboard(user_id)
 
     if deleted:
-        await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o‘chirildi!", reply_markup=keyboard)
+        await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o'chirildi!", reply_markup=keyboard)
     else:
-        await message.answer("⚠️ Foydalanuvchi topilmadi yoki o‘chirishda xatolik yuz berdi.", reply_markup=keyboard)
+        await message.answer("⚠️ Foydalanuvchi topilmadi yoki o'chirishda xatolik yuz berdi.", reply_markup=keyboard)
 
     await message.answer("Quyidagi menyudan birini tanlang:", reply_markup=get_main_menu())
-

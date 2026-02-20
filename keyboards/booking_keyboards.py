@@ -39,7 +39,7 @@ async def service_keyboard() -> InlineKeyboardMarkup:
                 emoji = SERVICE_EMOJIS.get(s.name, "🔹")
                 builder.button(
                     text=f"{emoji} {s.name}",   # ✅ emoji textda
-                    callback_data=f"service_{s.name}"  # ✅ callback_data faqat matn
+                    callback_data=f"service_{s.id}"  # ✅ callback_data numeric id
                 )
 
         builder.adjust(1)

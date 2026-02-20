@@ -11,7 +11,7 @@ from utils.emoji_map import SERVICE_EMOJIS
 router = Router()
 
 
-def service_nav_keyboard(index: int, total: int, service_name: str):
+def service_nav_keyboard(index: int, total: int, service_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -19,7 +19,7 @@ def service_nav_keyboard(index: int, total: int, service_name: str):
                 InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"services_next_{index}"),
             ],
             [
-                InlineKeyboardButton(text="🗓️ Navbat boshlash", callback_data=f"book_service_{service_name}"),
+                InlineKeyboardButton(text="🗓️ Navbat boshlash", callback_data=f"book_service_{service_id}"),
             ],
             [
                 InlineKeyboardButton(text="🔙 Orqaga", callback_data="back"),
@@ -40,7 +40,7 @@ async def send_service(callback: types.CallbackQuery, services, index: int):
         f"\n📌 <i>({index + 1} / {len(services)})</i>"
     )
 
-    keyboard = service_nav_keyboard(index, len(services), service.name)
+    keyboard = service_nav_keyboard(index, len(services), service.id)
 
     # Sizning modelda rasm Services.photo ichida saqlanadi (file_id)
     service_photo = getattr(service, "photo", None)
