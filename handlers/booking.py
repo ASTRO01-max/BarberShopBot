@@ -1,4 +1,4 @@
-﻿#handlers/booking.py
+﻿# handlers/booking.py
 import logging
 import re
 
@@ -30,10 +30,21 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
+BOOKING_FOR_ME_CB = "booking_for_me"
+BOOKING_FOR_OTHER_CB = "booking_for_other"
 
 
 def with_cancel_hint(text: str) -> str:
     return f"{text}{CANCEL_HINT}"
+
+
+def _booking_target_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Men uchun", callback_data=BOOKING_FOR_ME_CB)],
+            [InlineKeyboardButton(text="Menga emas", callback_data=BOOKING_FOR_OTHER_CB)],
+        ]
+    )
 
 
 def _service_nav_keyboard(index: int, total: int, service_id: str) -> InlineKeyboardMarkup:
@@ -342,6 +353,8 @@ async def _has_user_profile(user_id: int, state: FSMContext) -> bool:
     state_data = await state.get_data()
     if state_data.get("fullname") and state_data.get("phonenumber"):
         return True
+    if state_data.get("is_for_other"):
+        return False
     user = await get_user(user_id)
     return bool(user)
 
@@ -451,6 +464,18 @@ async def cancel_booking(message: types.Message, state: FSMContext):
 
 async def start_booking(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    text = with_cancel_hint("Kim uchun navbat olmoqchisiz?")
+    markup = _booking_target_keyboard()
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, reply_markup=markup)
+    else:
+        await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+async def _start_booking_for_me(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.update_data(is_for_other=False)
     user_id = callback.from_user.id
     user = await get_user(user_id)
 
@@ -466,6 +491,19 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Navbat olish boshlandi ✅")
     else:
         await callback.answer("Xizmatlar topilmadi", show_alert=True)
+
+
+@router.callback_query(F.data == BOOKING_FOR_ME_CB)
+async def booking_for_me_callback(callback: CallbackQuery, state: FSMContext):
+    await _start_booking_for_me(callback, state)
+
+
+@router.callback_query(F.data == BOOKING_FOR_OTHER_CB)
+async def booking_for_other_callback(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(is_for_other=True)
+    await _ask_fullname(callback)
+    await state.set_state(UserState.waiting_for_fullname)
+    await callback.answer("Boshqa shaxs uchun ma'lumot kiriting ✅")
 
 
 async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
@@ -841,10 +879,11 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         return
 
     user_data = await state.get_data()
+    is_for_other = bool(user_data.get("is_for_other"))
     fullname = user_data.get("fullname")
     phone = user_data.get("phonenumber")
 
-    if not fullname or not phone:
+    if (not fullname or not phone) and not is_for_other:
         user = await get_user(user_id)
         if user:
             fullname = fullname or user.fullname
@@ -853,7 +892,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     fullname = fullname or "Noma'lum"
     phone = phone or "Noma'lum"
 
-    if fullname != "Noma'lum" and phone != "Noma'lum":
+    if not is_for_other and fullname != "Noma'lum" and phone != "Noma'lum":
         saved_user = await save_user(
             {
                 "tg_id": user_id,

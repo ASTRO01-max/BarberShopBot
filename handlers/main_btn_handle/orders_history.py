@@ -179,3 +179,4 @@ async def back_to_today(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
     await state.update_data(today_order_cards=order_cards, today_current_page=page)
     await callback.answer()
+#

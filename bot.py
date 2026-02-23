@@ -90,6 +90,16 @@ dp.callback_query.register(
     lambda c: c.data == "book"
 )
 
+dp.callback_query.register(
+    booking.booking_for_me_callback,
+    lambda c: c.data == "booking_for_me"
+)
+
+dp.callback_query.register(
+    booking.booking_for_other_callback,
+    lambda c: c.data == "booking_for_other"
+)
+
 dp.include_router(main_btn_router)
 
 # FSM - Xizmat tanlash
