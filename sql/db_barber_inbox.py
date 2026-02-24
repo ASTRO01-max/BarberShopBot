@@ -9,6 +9,17 @@ logger = logging.getLogger(__name__)
 async def inbox_add(order_id: int, barber_tg_id: int) -> Optional[BarberOrderInbox]:
     async with async_session() as session:
         try:
+            existing = await session.execute(
+                select(BarberOrderInbox).where(
+                    BarberOrderInbox.order_id == int(order_id),
+                    BarberOrderInbox.barber_tg_id == int(barber_tg_id),
+                )
+                .order_by(BarberOrderInbox.id.desc())
+            )
+            row = existing.scalars().first()
+            if row:
+                return row
+
             row = BarberOrderInbox(order_id=order_id, barber_tg_id=barber_tg_id)
             session.add(row)
             await session.commit()

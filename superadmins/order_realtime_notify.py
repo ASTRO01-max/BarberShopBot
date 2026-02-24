@@ -26,6 +26,14 @@ def _notify_keyboard(order_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def _batch_notify_text(total: int) -> str:
+    return (
+        "📥 <b>Yangi navbatlar bor</b>\n\n"
+        f"🧾 <b>Soni:</b> {total} ta\n"
+        "📌 Tartibli ko'rish uchun <b>Batafsil ko'rish</b> tugmasini bosing."
+    )
+
+
 async def _service_name(session, service_id_raw: str) -> str:
     if not service_id_raw:
         return "Noma'lum"
@@ -81,6 +89,8 @@ async def notify_barber_realtime(bot: Bot, order_id: int, barber_db_id: int) -> 
     inbox_row = await inbox_add(order_id=int(order_id), barber_tg_id=int(barber_tg_id))
     if not inbox_row:
         return
+    if getattr(inbox_row, "is_delivered", False):
+        return
 
     if is_barber_active(barber_tg_id):
         try:
@@ -103,17 +113,28 @@ async def flush_undelivered_to_barber(bot: Bot, barber_tg_id: int) -> None:
     if not rows:
         return
 
+    unique_order_ids = []
+    seen_order_ids = set()
     for row in rows:
-        try:
-            text = await _build_short_text(row.order_id)
-            await bot.send_message(
-                chat_id=barber_tg_id,
-                text=text,
-                parse_mode="HTML",
-                reply_markup=_notify_keyboard(row.order_id),
-                disable_web_page_preview=True
-            )
-            await inbox_mark_delivered(row.id)
-        except Exception:
-            logger.exception("flush_undelivered_to_barber failed for order_id=%s", row.order_id)
+        order_id = int(row.order_id)
+        if order_id in seen_order_ids:
             continue
+        seen_order_ids.add(order_id)
+        unique_order_ids.append(order_id)
+
+    if not unique_order_ids:
+        return
+
+    anchor_order_id = unique_order_ids[0]
+    try:
+        await bot.send_message(
+            chat_id=barber_tg_id,
+            text=_batch_notify_text(len(unique_order_ids)),
+            parse_mode="HTML",
+            reply_markup=_notify_keyboard(anchor_order_id),
+            disable_web_page_preview=True
+        )
+        for row in rows:
+            await inbox_mark_delivered(row.id)
+    except Exception:
+        logger.exception("flush_undelivered_to_barber failed for barber_tg_id=%s", barber_tg_id)

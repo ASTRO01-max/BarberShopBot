@@ -149,7 +149,7 @@ dp.callback_query.register(
 dp.callback_query.register(
     booking.book_step2,
     booking.UserState.waiting_for_barber,
-    F.data.startswith("barber_")
+    F.data.regexp(r"^barber_\d+_\d+$")
 )
 
 # FSM - Sana tanlash
