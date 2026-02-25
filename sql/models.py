@@ -141,3 +141,8 @@ class BarberOrderInbox(Base):
     is_seen = Column(Boolean, default=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+
+class BarberExpanded(Base):
+    __tablename__ = "barber_expanded"
