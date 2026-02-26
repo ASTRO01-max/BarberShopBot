@@ -2,8 +2,10 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from sqlalchemy import select
+
+from sql.db_barbers_expanded import add_service_to_barber, get_barber_services
 from sql.db import async_session
-from sql.models import Barbers
+from sql.models import Barbers, Services
 from .panel_presence import touch_barber
 from .order_realtime_notify import flush_undelivered_to_barber
 
@@ -68,4 +70,69 @@ async def back_to_barber_menu(callback: types.CallbackQuery):
         await callback.message.answer("💈 Barber paneli", reply_markup=get_barber_menu())
 
     await callback.answer()
+
+
+@router.message(F.text == "➕ Xizmat kiritish")
+async def show_add_service_menu(message: types.Message):
+    barber = await get_barber_by_tg_id(message.from_user.id)
+    if not barber:
+        await message.answer("❌ Bu bo'lim faqat barberlar uchun.")
+        return
+
+    async with async_session() as session:
+        result = await session.execute(select(Services).order_by(Services.id.asc()))
+        services = result.scalars().all()
+
+    if not services:
+        await message.answer("⚠️ Hozircha xizmatlar mavjud emas.")
+        return
+
+    selected_services = await get_barber_services(barber.id)
+    from .superadmin_buttons import get_add_service_keyboard
+
+    await message.answer(
+        "Quyidagi xizmatlardan o'zingiz bajara oladiganlarini tanlang:",
+        reply_markup=get_add_service_keyboard(services, selected_services),
+    )
+
+
+@router.callback_query(F.data.startswith("barber_add_service_"))
+async def add_barber_service(callback: types.CallbackQuery):
+    barber = await get_barber_by_tg_id(callback.from_user.id)
+    if not barber:
+        await callback.answer("❌ Bu bo'lim faqat barberlar uchun.", show_alert=True)
+        return
+
+    parts = callback.data.rsplit("_", 1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        await callback.answer("❌ Noto'g'ri xizmat.", show_alert=True)
+        return
+
+    service_id = int(parts[1])
+
+    async with async_session() as session:
+        service = await session.get(Services, service_id)
+        if not service:
+            await callback.answer("❌ Xizmat topilmadi.", show_alert=True)
+            return
+
+        result = await session.execute(select(Services).order_by(Services.id.asc()))
+        services = result.scalars().all()
+
+    is_added = await add_service_to_barber(barber.id, service_id)
+    selected_services = await get_barber_services(barber.id)
+
+    from .superadmin_buttons import get_add_service_keyboard
+
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=get_add_service_keyboard(services, selected_services)
+        )
+    except Exception:
+        pass
+
+    if is_added:
+        await callback.answer("✅ Xizmat muvaffaqiyatli qo'shildi.")
+    else:
+        await callback.answer("⚠️ Bu xizmat allaqachon qo'shilgan.", show_alert=True)
 

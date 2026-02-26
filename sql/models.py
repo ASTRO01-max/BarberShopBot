@@ -1,5 +1,17 @@
 # sql/models.py
-from sqlalchemy import Column, Integer, BigInteger, String, Date, Time, Boolean, JSON, DateTime, Float
+from sqlalchemy import (
+    Column,
+    Integer,
+    BigInteger,
+    String,
+    Date,
+    Time,
+    Boolean,
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+)
 from sqlalchemy import LargeBinary
 from sqlalchemy.sql import func
 from sql.db import Base
@@ -145,4 +157,15 @@ class BarberOrderInbox(Base):
 
 
 class BarberExpanded(Base):
-    __tablename__ = "barber_expanded"
+    __tablename__ = "barbers_expanded"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    barber_id = Column(
+        BigInteger,
+        ForeignKey("barbers.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    barber_includes = Column(JSON, nullable=False, default=list)
+    

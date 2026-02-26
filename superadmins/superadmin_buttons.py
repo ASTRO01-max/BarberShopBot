@@ -51,6 +51,7 @@ def get_barber_menu(hide_pause: bool = False):
             second_row,
             [
                 KeyboardButton(text="📅 Bugungi buyurtmalar"),
+                KeyboardButton(text="➕ Xizmat kiritish")
             ],
         ],
         resize_keyboard=True,
@@ -149,4 +150,26 @@ def get_order_actions_keyboard(order_id: int, client_tg_id: int = None, phone: s
     )
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_add_service_keyboard(services, selected_service_ids: list[int] | None = None) -> InlineKeyboardMarkup:
+    selected = {int(sid) for sid in (selected_service_ids or [])}
+    inline_keyboard = []
+
+    for service in services:
+        service_id = int(service.id)
+        prefix = "✅ " if service_id in selected else ""
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{prefix}{service.name}",
+                    callback_data=f"barber_add_service_{service_id}",
+                )
+            ]
+        )
+
+    inline_keyboard.append(
+        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="barber_menu")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 

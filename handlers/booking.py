@@ -1,6 +1,7 @@
 ﻿# handlers/booking.py
 import logging
 import re
+from datetime import date, datetime, time, timedelta
 
 from aiogram import F, Router, types
 from aiogram.filters import StateFilter
@@ -18,9 +19,10 @@ from keyboards import booking_keyboards
 from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyboard
 from keyboards.main_menu import get_main_menu
 from sql.db import async_session
-from sql.db_order_utils import get_booked_times, save_order
+from sql.db_barbers_expanded import get_barbers_by_service
+from sql.db_order_utils import save_order
 from sql.db_users_utils import get_user, save_user
-from sql.models import BarberPhotos, Barbers, Services
+from sql.models import BarberPhotos, Barbers, Order, Services
 from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.emoji_map import SERVICE_EMOJIS
 from utils.states import UserState
@@ -32,10 +34,263 @@ router = Router()
 CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
 BOOKING_FOR_ME_CB = "booking_for_me"
 BOOKING_FOR_OTHER_CB = "booking_for_other"
+NO_BARBER_FOR_SERVICE_TEXT = "Hozircha ushbu xizmat uchun barber mavjud emas"
+TIME_BUTTONS_PER_ROW = 2
+DEFAULT_EXISTING_ORDER_DURATION_MINUTES = 60
+ISO_DATE_FORMAT = "%Y-%m-%d"
+HM_TIME_FORMAT = "%H:%M"
+DURATION_HOUR_PATTERN = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(soat|hour|hours|hr|hrs|h|час|ч)\b",
+    re.IGNORECASE,
+)
+DURATION_MINUTE_PATTERN = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(daqiqa|minute|minutes|min|мин|m)\b",
+    re.IGNORECASE,
+)
+TIME_TOKEN_PATTERN = re.compile(r"\d{1,2}:\d{2}")
 
 
 def with_cancel_hint(text: str) -> str:
     return f"{text}{CANCEL_HINT}"
+
+
+def _parse_duration_minutes(raw_duration: str | int | float | None) -> int | None:
+    if raw_duration is None:
+        return None
+
+    if isinstance(raw_duration, (int, float)):
+        value = int(raw_duration)
+        return value if value > 0 else None
+
+    duration_text = str(raw_duration).strip().lower()
+    if not duration_text:
+        return None
+
+    direct_time_match = re.fullmatch(r"(\d{1,2}):(\d{2})", duration_text)
+    if direct_time_match:
+        hours = int(direct_time_match.group(1))
+        minutes = int(direct_time_match.group(2))
+        total_minutes = hours * 60 + minutes
+        return total_minutes if total_minutes > 0 else None
+
+    if duration_text.isdigit():
+        value = int(duration_text)
+        return value if value > 0 else None
+
+    normalized_text = duration_text.replace(",", ".")
+    total_minutes = 0.0
+
+    for value, _ in DURATION_HOUR_PATTERN.findall(normalized_text):
+        total_minutes += float(value) * 60
+    for value, _ in DURATION_MINUTE_PATTERN.findall(normalized_text):
+        total_minutes += float(value)
+
+    if total_minutes > 0:
+        return int(total_minutes)
+
+    fallback_number = re.search(r"\d+(?:\.\d+)?", normalized_text)
+    if fallback_number:
+        guessed_minutes = int(float(fallback_number.group(0)))
+        return guessed_minutes if guessed_minutes > 0 else None
+
+    return None
+
+
+def _parse_work_time_bounds(raw_work_time: str | None) -> tuple[time, time] | None:
+    if not isinstance(raw_work_time, str):
+        return None
+
+    tokens = TIME_TOKEN_PATTERN.findall(raw_work_time)
+    if len(tokens) < 2:
+        return None
+
+    try:
+        start_time = datetime.strptime(tokens[0], HM_TIME_FORMAT).time()
+        end_time = datetime.strptime(tokens[1], HM_TIME_FORMAT).time()
+    except ValueError:
+        return None
+
+    if start_time >= end_time:
+        return None
+    return start_time, end_time
+
+
+def _parse_iso_date(value: str) -> date | None:
+    try:
+        return datetime.strptime(value, ISO_DATE_FORMAT).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_time_value(raw_time: time | datetime | str | None) -> time | None:
+    if raw_time is None:
+        return None
+    if isinstance(raw_time, time):
+        return raw_time
+    if isinstance(raw_time, datetime):
+        return raw_time.time()
+    if isinstance(raw_time, str):
+        text = raw_time.strip()
+        for fmt in (HM_TIME_FORMAT, "%H:%M:%S"):
+            try:
+                return datetime.strptime(text, fmt).time()
+            except ValueError:
+                continue
+    return None
+
+
+def _combine_local_datetime(target_date: date, target_time: time, tzinfo) -> datetime:
+    naive_value = datetime.combine(target_date, target_time)
+    return naive_value.replace(tzinfo=tzinfo) if tzinfo else naive_value
+
+
+def _merge_busy_intervals(
+    intervals: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    if not intervals:
+        return []
+
+    sorted_intervals = sorted(intervals, key=lambda item: item[0])
+    merged: list[tuple[datetime, datetime]] = [sorted_intervals[0]]
+
+    for current_start, current_end in sorted_intervals[1:]:
+        last_start, last_end = merged[-1]
+        if current_start <= last_end:
+            merged[-1] = (last_start, max(last_end, current_end))
+        else:
+            merged.append((current_start, current_end))
+
+    return merged
+
+
+async def _calculate_available_slots(
+    service_id: str,
+    barber_id: str,
+    date_str: str,
+) -> list[str]:
+    target_date = _parse_iso_date(date_str)
+    if target_date is None:
+        return []
+
+    try:
+        service_db_id = int(service_id)
+        barber_db_id = int(barber_id)
+    except (TypeError, ValueError):
+        return []
+
+    local_now = datetime.now().astimezone()
+    tzinfo = local_now.tzinfo
+
+    async with async_session() as session:
+        service = await session.get(Services, service_db_id)
+        barber = await session.get(Barbers, barber_db_id)
+        if not service or not barber or barber.is_paused:
+            return []
+
+        work_bounds = _parse_work_time_bounds(barber.work_time)
+        service_duration = _parse_duration_minutes(service.duration)
+        if not work_bounds or not service_duration:
+            return []
+
+        orders_result = await session.execute(
+            select(Order.time, Order.service_id).where(
+                Order.barber_id == str(barber_id),
+                Order.date == target_date,
+            )
+        )
+        booked_rows = orders_result.all()
+
+        booked_service_ids = {
+            int(order_service_id)
+            for _, order_service_id in booked_rows
+            if str(order_service_id).isdigit()
+        }
+
+        duration_by_service_id: dict[str, int] = {}
+        if booked_service_ids:
+            durations_result = await session.execute(
+                select(Services.id, Services.duration).where(Services.id.in_(booked_service_ids))
+            )
+            for booked_service_id, booked_duration in durations_result.all():
+                parsed = _parse_duration_minutes(booked_duration)
+                if parsed:
+                    duration_by_service_id[str(booked_service_id)] = parsed
+
+    start_time, end_time = work_bounds
+    work_start = _combine_local_datetime(target_date, start_time, tzinfo)
+    work_end = _combine_local_datetime(target_date, end_time, tzinfo)
+    slot_duration = timedelta(minutes=service_duration)
+
+    if work_start >= work_end or slot_duration <= timedelta(0):
+        return []
+
+    busy_intervals: list[tuple[datetime, datetime]] = []
+    for booked_time_raw, booked_service_id_raw in booked_rows:
+        booked_time = _normalize_time_value(booked_time_raw)
+        if booked_time is None:
+            continue
+
+        booked_duration = duration_by_service_id.get(str(booked_service_id_raw))
+        if booked_duration is None:
+            booked_duration = service_duration or DEFAULT_EXISTING_ORDER_DURATION_MINUTES
+
+        busy_start = _combine_local_datetime(target_date, booked_time, tzinfo)
+        busy_end = busy_start + timedelta(minutes=booked_duration)
+        busy_intervals.append((busy_start, busy_end))
+
+    merged_busy = _merge_busy_intervals(busy_intervals)
+
+    available_slots: list[str] = []
+    current_start = work_start
+    busy_index = 0
+
+    while current_start + slot_duration <= work_end:
+        current_end = current_start + slot_duration
+
+        while busy_index < len(merged_busy) and merged_busy[busy_index][1] <= current_start:
+            busy_index += 1
+
+        has_overlap = (
+            busy_index < len(merged_busy)
+            and merged_busy[busy_index][0] < current_end
+            and merged_busy[busy_index][1] > current_start
+        )
+
+        if current_start > local_now and not has_overlap:
+            available_slots.append(current_start.strftime(HM_TIME_FORMAT))
+
+        current_start += slot_duration
+
+    return available_slots
+
+
+async def _build_time_keyboard(
+    service_id: str,
+    barber_id: str,
+    date_str: str,
+) -> InlineKeyboardMarkup | None:
+    available_slots = await _calculate_available_slots(service_id, barber_id, date_str)
+    if not available_slots:
+        return None
+
+    inline_rows: list[list[InlineKeyboardButton]] = []
+    current_row: list[InlineKeyboardButton] = []
+
+    for index, slot_time in enumerate(available_slots, start=1):
+        current_row.append(
+            InlineKeyboardButton(
+                text=slot_time,
+                callback_data=f"confirm_{service_id}_{barber_id}_{date_str}_{slot_time}",
+            )
+        )
+        if index % TIME_BUTTONS_PER_ROW == 0:
+            inline_rows.append(current_row)
+            current_row = []
+
+    if current_row:
+        inline_rows.append(current_row)
+
+    return InlineKeyboardMarkup(inline_keyboard=inline_rows)
 
 
 def _booking_target_keyboard() -> InlineKeyboardMarkup:
@@ -101,14 +356,31 @@ async def _fetch_services():
         return result.scalars().all()
 
 
-async def _fetch_active_barbers():
+async def _fetch_active_barbers_by_service(service_id: str):
+    try:
+        normalized_service_id = int(str(service_id))
+    except (TypeError, ValueError):
+        return []
+
+    barber_ids = await get_barbers_by_service(normalized_service_id)
+    if not barber_ids:
+        return []
+
     async with async_session() as session:
         result = await session.execute(
             select(Barbers)
-            .where(or_(Barbers.is_paused.is_(False), Barbers.is_paused.is_(None)))
+            .where(
+                Barbers.id.in_(barber_ids),
+                or_(Barbers.is_paused.is_(False), Barbers.is_paused.is_(None)),
+            )
             .order_by(Barbers.id.asc())
         )
         return result.scalars().all()
+
+
+async def _is_barber_available_for_service(service_id: str, barber_id: str) -> bool:
+    barbers = await _fetch_active_barbers_by_service(service_id)
+    return any(str(barber.id) == str(barber_id) for barber in barbers)
 
 
 async def _fetch_latest_barber_photo(barber_id: int):
@@ -276,11 +548,11 @@ async def _show_service_page_message(message: Message, index: int = 0) -> bool:
 
 
 async def _show_barber_page_callback(callback: CallbackQuery, service_id: str, index: int = 0) -> bool:
-    barbers = await _fetch_active_barbers()
+    barbers = await _fetch_active_barbers_by_service(service_id)
     if not barbers:
         await _render_catalog_callback(
             callback,
-            with_cancel_hint("⚠️ Hozircha faol barberlar mavjud emas."),
+            with_cancel_hint(f"⚠️ {NO_BARBER_FOR_SERVICE_TEXT}."),
             booking_keyboards.back_button(),
         )
         return False
@@ -315,9 +587,9 @@ async def _show_barber_page_callback(callback: CallbackQuery, service_id: str, i
 
 
 async def _show_barber_page_message(message: Message, service_id: str, index: int = 0) -> bool:
-    barbers = await _fetch_active_barbers()
+    barbers = await _fetch_active_barbers_by_service(service_id)
     if not barbers:
-        await message.answer(with_cancel_hint("⚠️ Hozircha faol barberlar mavjud emas."))
+        await message.answer(with_cancel_hint(f"⚠️ {NO_BARBER_FOR_SERVICE_TEXT}."))
         return False
 
     index = index % len(barbers)
@@ -411,21 +683,24 @@ async def _handle_service_selected(callback: CallbackQuery, state: FSMContext, s
     barber_id = data.get("barber_id")
 
     if barber_id:
-        await _go_to_date_from_callback(
-            callback,
-            state,
-            service_id,
-            str(barber_id),
-            "Xizmat tanlandi ✅",
-        )
-        return
+        if await _is_barber_available_for_service(service_id, str(barber_id)):
+            await _go_to_date_from_callback(
+                callback,
+                state,
+                service_id,
+                str(barber_id),
+                "Xizmat tanlandi ✅",
+            )
+            return
+
+        await state.update_data(barber_id=None)
 
     shown = await _show_barber_page_callback(callback, service_id, index=0)
     await state.set_state(UserState.waiting_for_barber)
     if shown:
         await callback.answer("Xizmat tanlandi ✅")
     else:
-        await callback.answer("Faol barberlar topilmadi", show_alert=True)
+        await callback.answer(NO_BARBER_FOR_SERVICE_TEXT, show_alert=True)
 
 
 async def _handle_barber_selected(
@@ -434,10 +709,24 @@ async def _handle_barber_selected(
     service_id: str,
     barber_id: str,
 ):
+    resolved_service_id = await _resolve_service_id(service_id)
+    if not resolved_service_id:
+        await callback.answer("Xizmat topilmadi", show_alert=True)
+        return
+
+    if not await _is_barber_available_for_service(resolved_service_id, barber_id):
+        shown = await _show_barber_page_callback(callback, resolved_service_id, index=0)
+        await state.set_state(UserState.waiting_for_barber)
+        if shown:
+            await callback.answer("Tanlangan barber ushbu xizmatni ko'rsatmaydi", show_alert=True)
+        else:
+            await callback.answer(NO_BARBER_FOR_SERVICE_TEXT, show_alert=True)
+        return
+
     await _go_to_date_from_callback(
         callback,
         state,
-        service_id,
+        resolved_service_id,
         barber_id,
         "Barber tanlandi ✅",
     )
@@ -548,7 +837,6 @@ async def start_booking_from_service(callback: CallbackQuery, state: FSMContext)
         return
 
     await state.update_data(service_id=service_id)
-    data = await state.get_data()
     has_profile = await _has_user_profile(callback.from_user.id, state)
 
     if not has_profile:
@@ -557,23 +845,7 @@ async def start_booking_from_service(callback: CallbackQuery, state: FSMContext)
         await callback.answer("Xizmat tanlandi, ro'yxatdan o'tamiz ✅")
         return
 
-    barber_id = data.get("barber_id")
-    if barber_id:
-        await _go_to_date_from_callback(
-            callback,
-            state,
-            service_id,
-            str(barber_id),
-            "Xizmat tanlandi ✅",
-        )
-        return
-
-    shown = await _show_barber_page_callback(callback, service_id, index=0)
-    await state.set_state(UserState.waiting_for_barber)
-    if shown:
-        await callback.answer("Xizmat tanlandi ✅")
-    else:
-        await callback.answer("Faol barberlar topilmadi", show_alert=True)
+    await _handle_service_selected(callback, state, service_id)
 
 
 async def process_fullname(message: Message, state: FSMContext):
@@ -639,20 +911,18 @@ async def process_phonenumber(message: Message, state: FSMContext):
     barber_id = str(data["barber_id"]) if data.get("barber_id") is not None else None
 
     if service_id and barber_id:
-        await _go_to_date_from_message(message, state, service_id, barber_id)
-        return
+        if await _is_barber_available_for_service(service_id, barber_id):
+            await _go_to_date_from_message(message, state, service_id, barber_id)
+            return
+        await state.update_data(barber_id=None)
 
     if service_id:
-        shown = await _show_barber_page_message(message, service_id, index=0)
+        await _show_barber_page_message(message, service_id, index=0)
         await state.set_state(UserState.waiting_for_barber)
-        if not shown:
-            await message.answer(with_cancel_hint("⚠️ Faol barberlar topilmadi."))
         return
 
-    shown = await _show_service_page_message(message, index=0)
+    await _show_service_page_message(message, index=0)
     await state.set_state(UserState.waiting_for_service)
-    if not shown:
-        await message.answer(with_cancel_hint("⚠️ Xizmatlar topilmadi."))
 
 
 async def booking_service_nav(callback: CallbackQuery, state: FSMContext):
@@ -704,16 +974,20 @@ async def booking_barber_nav(callback: CallbackQuery, state: FSMContext):
         return
 
     action = parts[1]
-    service_id = parts[2]
+    service_id = await _resolve_service_id(parts[2])
+    if not service_id:
+        await callback.answer("Xizmat topilmadi", show_alert=True)
+        return
+
     try:
         index = int(parts[3])
     except ValueError:
         await callback.answer("Noto'g'ri sahifa", show_alert=True)
         return
 
-    barbers = await _fetch_active_barbers()
+    barbers = await _fetch_active_barbers_by_service(service_id)
     if not barbers:
-        await callback.answer("Faol barberlar topilmadi", show_alert=True)
+        await callback.answer(NO_BARBER_FOR_SERVICE_TEXT, show_alert=True)
         return
 
     if action == "next":
@@ -757,7 +1031,11 @@ async def book_step2(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Noto'g'ri barber", show_alert=True)
         return
 
-    service_id = parts[1]
+    service_id = await _resolve_service_id(parts[1])
+    if not service_id:
+        await callback.answer("Xizmat topilmadi", show_alert=True)
+        return
+
     barber_id = parts[2]
     await _handle_barber_selected(callback, state, service_id, barber_id)
 
@@ -766,7 +1044,7 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
     _, service_id, barber_id, date = callback.data.split("_")
     await state.update_data(date=date)
 
-    keyboard = await booking_keyboards.time_keyboard(service_id, barber_id, date)
+    keyboard = await _build_time_keyboard(service_id, barber_id, date)
 
     if keyboard is None:
         back_markup = InlineKeyboardMarkup(
@@ -821,7 +1099,7 @@ async def book_step3_message(message: Message, state: FSMContext):
     await state.update_data(date=date)
 
     data = await state.get_data()
-    keyboard = await booking_keyboards.time_keyboard(
+    keyboard = await _build_time_keyboard(
         data["service_id"],
         data["barber_id"],
         date,
@@ -870,10 +1148,10 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard)
         )
 
-    booked_times = await get_booked_times(barber_id, date_str)
-    if time_str in booked_times:
+    available_slots = await _calculate_available_slots(service_id, barber_id, date_str)
+    if time_str not in available_slots:
         await callback.answer(
-            "⛔ Ushbu vaqt hozirgina band bo'ldi.\nBoshqa vaqt tanlang.",
+            "⛔ Ushbu vaqt endi mavjud emas.\nBoshqa vaqt tanlang.",
             show_alert=True,
         )
         return
