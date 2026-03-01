@@ -71,16 +71,6 @@ def get_info_inline_actions_kb() -> InlineKeyboardMarkup:
         ]
     )
 
-# markup = ReplyKeyboardMarkup(
-#     keyboard=[
-#         [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📁 Buyurtmalar ro'yxati")],
-#         [KeyboardButton(text="💈 Servis qo'shish"), KeyboardButton(text="💈 Servisni o'chirish")],
-#         [KeyboardButton(text="💈 Barber qo'shish"), KeyboardButton(text="💈 Barberni o'cirish")],
-#         [KeyboardButton(text="ℹ️ Kontakt/Info kiritish"), KeyboardButton(text="✏️ Kontakt/Info tahrirlash")],
-#         [KeyboardButton(text="✉️ Mahsus xabar yuborish"), KeyboardButton(text="Admin qo'shish")],
-#     ],
-#     resize_keyboard=True
-# )
 
 markup = ReplyKeyboardMarkup(
     keyboard=[

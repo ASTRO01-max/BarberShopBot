@@ -15,7 +15,6 @@ from handlers import (
     info,
     booking,
     back,
-    support,
 )
 from handlers.main_btn_handle import router as main_btn_router
 
@@ -40,9 +39,6 @@ dp.include_router(admins_router)
 
 #BARBER PANEL
 dp.include_router(barber_router)
-
-#SUPPORT_PANEL
-dp.include_router(support.router)
 
 # Xizmatlarni ko‘rsatish
 dp.callback_query.register(
