@@ -42,7 +42,7 @@ def _service_toggle_keyboard(
     service_id: int,
     is_selected: bool,
 ) -> InlineKeyboardMarkup:
-    action_text = "❌ Xizmatni chiqarib tashlash" if is_selected else "✅ Xizmatni kiritish"
+    action_text = "❌ Xizmatni chiqarib tashlash" if is_selected else "✅ Xizmatlarimga qo'shish"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -206,7 +206,7 @@ async def _show_service_page_message(
     return True
 
 
-@router.message(F.text == "➕ Xizmat kiritish")
+@router.message(F.text == "➕ Xizmatlarimni kiritish")
 async def show_add_service_menu(message: types.Message):
     barber = await get_barber_by_tg_id(message.from_user.id)
     if not barber:

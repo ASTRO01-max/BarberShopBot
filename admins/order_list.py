@@ -8,7 +8,7 @@ from sql.models import Order, Services, Barbers
 from sqlalchemy import func
 
 router = Router()
-ORDERS_PER_PAGE = 5
+ORDERS_PER_PAGE = 1
 CHECK_ORDERS_PER_PAGE = 1
 
 

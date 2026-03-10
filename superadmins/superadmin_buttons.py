@@ -1,4 +1,4 @@
-﻿#superadmins/superadmin_buttons.py
+﻿# superadmins/superadmin_buttons.py
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 
@@ -51,7 +51,7 @@ def get_barber_menu(hide_pause: bool = False):
             second_row,
             [
                 KeyboardButton(text="📅 Bugungi buyurtmalar"),
-                KeyboardButton(text="➕ Xizmat kiritish")
+                KeyboardButton(text="➕ Xizmatlarimni kiritish")
             ],
         ],
         resize_keyboard=True,

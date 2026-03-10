@@ -2,12 +2,10 @@
 import logging
 from datetime import datetime
 from typing import Any
-
 from aiogram import F, Router, types
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
-
 from sql.db import async_session
 from sql.models import Barbers, Order, Services
 

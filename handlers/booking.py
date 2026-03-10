@@ -14,7 +14,6 @@ from aiogram.types import (
     Message,
 )
 from sqlalchemy import or_, select
-
 from keyboards import booking_keyboards
 from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyboard
 from keyboards.main_menu import get_main_menu
@@ -1160,15 +1159,19 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     is_for_other = bool(user_data.get("is_for_other"))
     fullname = user_data.get("fullname")
     phone = user_data.get("phonenumber")
+    existing_user = None
+
+    if not is_for_other:
+        existing_user = await get_user(user_id)
 
     if (not fullname or not phone) and not is_for_other:
-        user = await get_user(user_id)
-        if user:
-            fullname = fullname or user.fullname
-            phone = phone or user.phone
+        if existing_user:
+            fullname = fullname or existing_user.fullname
+            phone = phone or existing_user.phone
 
     fullname = fullname or "Noma'lum"
     phone = phone or "Noma'lum"
+    should_send_menu_updated = False
 
     if not is_for_other and fullname != "Noma'lum" and phone != "Noma'lum":
         saved_user = await save_user(
@@ -1181,6 +1184,7 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         if saved_user:
             fullname = saved_user.fullname or fullname
             phone = saved_user.phone or phone
+            should_send_menu_updated = existing_user is None
 
     service_name = await _resolve_service_name(service_id)
     barber_name = await _resolve_barber_name(barber_id)
@@ -1219,10 +1223,11 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer("Vaqt tanlandi ✅")
-    await callback.message.answer(
-        "📱 Menyu yangilandi:",
-        reply_markup=await get_dynamic_main_keyboard(user_id),
-    )
+    if should_send_menu_updated:
+        await callback.message.answer(
+            "📱 Menyu yangilandi:",
+            reply_markup=await get_dynamic_main_keyboard(user_id),
+        )
     await callback.message.answer(
         "🏠 Asosiy menyu:",
         reply_markup=get_main_menu(),

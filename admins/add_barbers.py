@@ -1,19 +1,27 @@
 # admins/add_barbers.py
 from datetime import date
-from aiogram import Router, types, F
+
+from aiogram import F, Router, types
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import StateFilter, Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from sqlalchemy import select
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import func, select
 
 from sql.db import async_session
-from sql.models import Barbers, OrdinaryUser, BarberPhotos
+from sql.models import BarberPhotos, Barbers, OrdinaryUser
 from utils.states import AdminStates
-from .admin_buttons import get_barber_inline_actions_kb
+from .admin_buttons import (
+    BARBER_ADD_CB,
+    BARBER_DEL_CB,
+    BARBER_MENU_TEXT,
+    get_barber_inline_actions_kb,
+)
 
 router = Router()
 
 CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
+BARBER_NAV_PREFIX = "admbar"
+BARBER_PAGE_SIZE = 1
 
 
 def with_cancel_hint(text: str) -> str:
@@ -64,11 +72,9 @@ def _format_time_range(value, empty="yo'q"):
     if not value:
         return empty
 
-    # yangi holat (string)
     if isinstance(value, str):
         return value.strip() if value.strip() else empty
 
-    # eski holat (dict) - agar qaysidir joyda qolib ketgan bo'lsa
     if isinstance(value, dict):
         start = value.get("from")
         end = value.get("to")
@@ -78,11 +84,159 @@ def _format_time_range(value, empty="yo'q"):
     return empty
 
 
+def _barber_nav_keyboard(index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Oldingi",
+                    callback_data=f"{BARBER_NAV_PREFIX}_prev_{index}",
+                ),
+                InlineKeyboardButton(
+                    text="➡️ Keyingi",
+                    callback_data=f"{BARBER_NAV_PREFIX}_next_{index}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(text="➕ Barber qo'shish", callback_data=BARBER_ADD_CB),
+                InlineKeyboardButton(text="➖ Barber o'chirish", callback_data=BARBER_DEL_CB),
+            ],
+        ]
+    )
 
-# 1) START
+
+async def _count_barbers() -> int:
+    async with async_session() as session:
+        total = await session.scalar(select(func.count(Barbers.id)))
+    return int(total or 0)
+
+
+async def _fetch_barber_page(index: int, total: int | None = None):
+    if total is None:
+        total = await _count_barbers()
+    if total <= 0:
+        return 0, 0, None
+
+    normalized_index = index % total
+    offset = normalized_index * BARBER_PAGE_SIZE
+
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(
+                    Barbers.barber_first_name,
+                    Barbers.barber_last_name,
+                    Barbers.phone,
+                    Barbers.experience,
+                    Barbers.work_days,
+                    Barbers.work_time,
+                )
+                .order_by(Barbers.id.asc())
+                .limit(BARBER_PAGE_SIZE)
+                .offset(offset)
+            )
+        ).first()
+
+    return total, normalized_index, row
+
+
+def _render_barber_page_text(total: int, index: int, row) -> str:
+    if total <= 0 or not row:
+        return (
+            "💈 <b>Barberlar ro'yxati</b>\n\n"
+            "⚠️ <i>Hozircha barberlar mavjud emas.</i>\n\n"
+            "📌 <i>(0 / 0)</i>"
+        )
+
+    first_name, last_name, phone, experience, work_days, work_time = row
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip() or "Noma'lum barber"
+
+    return (
+        "💈 <b>Barberlar ro'yxati</b>\n\n"
+        f"👨‍💼 <b>{full_name}</b>\n"
+        f"💼 Tajriba: {experience or '-'}\n"
+        f"📅 Ish kunlari: {work_days or '-'}\n"
+        f"⏰ Ish vaqti: {work_time or '-'}\n"
+        f"📞 Aloqa: <code>{phone or '-'}</code>\n\n"
+        f"📌 <i>({index + 1} / {total})</i>"
+    )
+
+
+async def _show_barber_page_message(
+    message: types.Message,
+    index: int = 0,
+    total: int | None = None,
+) -> None:
+    total, index, row = await _fetch_barber_page(index, total=total)
+    await message.answer(
+        _render_barber_page_text(total, index, row),
+        parse_mode="HTML",
+        reply_markup=_barber_nav_keyboard(index),
+    )
+
+
+async def _show_barber_page_callback(
+    callback: types.CallbackQuery,
+    index: int = 0,
+    total: int | None = None,
+) -> None:
+    if not callback.message:
+        return
+
+    total, index, row = await _fetch_barber_page(index, total=total)
+    text = _render_barber_page_text(total, index, row)
+    keyboard = _barber_nav_keyboard(index)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith(f"{BARBER_NAV_PREFIX}_"))
+async def barber_pagination_nav(callback: types.CallbackQuery):
+    parts = (callback.data or "").split("_")
+    if len(parts) != 3:
+        await callback.answer("Noto'g'ri so'rov", show_alert=True)
+        return
+
+    action = parts[1]
+    if action not in {"prev", "next"}:
+        await callback.answer("Noto'g'ri so'rov", show_alert=True)
+        return
+
+    try:
+        index = int(parts[2])
+    except ValueError:
+        await callback.answer("Noto'g'ri sahifa", show_alert=True)
+        return
+
+    total = await _count_barbers()
+    if total > 0:
+        if action == "next":
+            index = (index + 1) % total
+        else:
+            index = (index - 1) % total
+    else:
+        index = 0
+
+    await _show_barber_page_callback(callback, index=index, total=total)
+    await callback.answer()
+
+
+@router.message(F.text == BARBER_MENU_TEXT)
+async def show_barber_actions(message: types.Message, state: FSMContext):
+    await state.clear()
+    await _show_barber_page_message(message, index=0)
+
+
+async def _send_existing_barbers_panel(message: types.Message) -> None:
+    await _show_barber_page_message(message, index=0)
+
+
 @router.message(F.text.contains("💈 Barber qo'shish"))
 async def add_barber_start(message: types.Message, state: FSMContext):
     await state.clear()
+    await _send_existing_barbers_panel(message)
     await state.set_state(AdminStates.adding_barber_fullname)
 
     await message.answer(
@@ -95,7 +249,6 @@ async def add_barber_start(message: types.Message, state: FSMContext):
     )
 
 
-# --------------------------- 2) FULLNAME ----------------------------
 @router.message(StateFilter(AdminStates.adding_barber_fullname))
 async def add_barber_fullname(message: types.Message, state: FSMContext):
     fullname = message.text.strip()
@@ -129,9 +282,7 @@ async def add_barber_fullname(message: types.Message, state: FSMContext):
 
         if not user:
             fallback = await session.execute(
-                select(OrdinaryUser).where(
-                    OrdinaryUser.first_name.ilike(first_name)
-                )
+                select(OrdinaryUser).where(OrdinaryUser.first_name.ilike(first_name))
             )
             user = fallback.scalar()
 
@@ -148,14 +299,13 @@ async def add_barber_fullname(message: types.Message, state: FSMContext):
     await state.set_state(AdminStates.adding_barber_phone)
     await message.answer(
         with_cancel_hint(
-            f"📞 Endi barberning telefon raqamini kiriting.\n\n"
+            "📞 Endi barberning telefon raqamini kiriting.\n\n"
             f"🔎 <b>Telegramdan topildi:</b> <code>{tg_id if tg_id else 'Topilmadi'}</code>"
         ),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
-# --------------------------- 3) PHONE ----------------------------
 @router.message(StateFilter(AdminStates.adding_barber_phone))
 async def add_barber_phone(message: types.Message, state: FSMContext):
     phone = message.text.strip()
@@ -166,7 +316,7 @@ async def add_barber_phone(message: types.Message, state: FSMContext):
                 "❌ Telefon raqam noto‘g‘ri.\n"
                 "Namuna: <b>+998901234567</b>"
             ),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
     await state.update_data(phone=phone)
@@ -177,11 +327,10 @@ async def add_barber_phone(message: types.Message, state: FSMContext):
             "💼 Barberning ish tajribasini kiriting.\n"
             "Masalan: <b>3 yil</b>"
         ),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
-# --------------------------- 4) EXPERIENCE ----------------------------
 @router.message(StateFilter(AdminStates.adding_barber_experience))
 async def add_barber_experience(message: types.Message, state: FSMContext):
     experience = message.text.strip()
@@ -197,11 +346,10 @@ async def add_barber_experience(message: types.Message, state: FSMContext):
             "📅 Barberning ish kunlarini kiriting.\n"
             "Masalan: <b>Dushanba–Juma</b>"
         ),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
-# --------------------------- 5) WORK DAYS ----------------------------
 @router.message(StateFilter(AdminStates.adding_barber_work_days))
 async def add_barber_work_days(message: types.Message, state: FSMContext):
     work_days = message.text.strip()
@@ -221,7 +369,6 @@ async def add_barber_work_days(message: types.Message, state: FSMContext):
     )
 
 
-# --------------------------- 6) WORK TIME ----------------------------
 @router.message(StateFilter(AdminStates.adding_barber_work_time))
 async def add_barber_work_time(message: types.Message, state: FSMContext):
     work_time_text = message.text.strip()
@@ -249,7 +396,6 @@ async def add_barber_work_time(message: types.Message, state: FSMContext):
     )
 
 
-# --------------------------- 7) BREAKDOWN ----------------------------
 @router.message(StateFilter(AdminStates.adding_barber_breakdown))
 async def add_barber_breakdown(message: types.Message, state: FSMContext):
     breakdown_text = message.text.strip().lower()
@@ -276,7 +422,7 @@ async def add_barber_breakdown(message: types.Message, state: FSMContext):
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="📸 Rasm qo‘shaman", callback_data="add_photo_yes"),
-                InlineKeyboardButton(text="➡️ Rasm kerak emas", callback_data="add_photo_no")
+                InlineKeyboardButton(text="➡️ Rasm kerak emas", callback_data="add_photo_no"),
             ]
         ]
     )
@@ -288,7 +434,6 @@ async def add_barber_breakdown(message: types.Message, state: FSMContext):
     )
 
 
-# --------------------------- 8) PHOTO CHOICE ----------------------------
 @router.callback_query(F.data == "add_photo_yes", StateFilter(AdminStates.adding_photo_choice))
 async def ask_for_photo(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
@@ -324,7 +469,7 @@ async def save_without_photo(call: types.CallbackQuery, state: FSMContext):
         f"👨‍🎤 <b>{data['first_name']} {data['last_name']}</b>\n"
         f"📞 {data['phone']}\n"
         f"💼 {data['experience']}\n"
-        f"💼 {data['work_days']}\n"
+        f"📅 {data['work_days']}\n"
         f"⏰ Ish vaqti: <b>{work_time}</b>\n"
         f"⏸️ Tanaffus: <b>{breakdown}</b>\n"
         "Rasm: <i>Yo'q</i>",
@@ -335,13 +480,8 @@ async def save_without_photo(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-# === YAGONA: rasm qabul qiluvchi handler (faqat bitta bo'lsin!) ===
 @router.message(StateFilter(AdminStates.adding_barber_photo), F.photo)
 async def add_barber_photo(message: types.Message, state: FSMContext):
-    """
-    Faol: message.photo[-1].file_id saqlaydi (TELEGRAM file_id)
-    E'tibor: eski bytea yuklovchi funksiyani BUTUNLAY o'chiring.
-    """
     photo_file_id = message.photo[-1].file_id
 
     data = await state.get_data()
@@ -400,7 +540,6 @@ async def add_barber_photo(message: types.Message, state: FSMContext):
     await state.clear()
 
 
-# fallback - agar user rasm o'rniga matn yuborsa
 @router.message(StateFilter(AdminStates.adding_barber_photo))
 async def expected_photo(message: types.Message):
     await message.answer(with_cancel_hint("❌ Iltimos, rasm yuboring (📸)."))

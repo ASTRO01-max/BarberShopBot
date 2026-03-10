@@ -24,9 +24,9 @@ SPECIAL_MSG_TARGET_LABELS = {
 def _broadcast_target_kb() -> types.InlineKeyboardMarkup:
     return types.InlineKeyboardMarkup(
         inline_keyboard=[
-            [types.InlineKeyboardButton(text="Adminlar uchun", callback_data=SPECIAL_MSG_ADMINS_CB)],
-            [types.InlineKeyboardButton(text="Barberlar uchun", callback_data=SPECIAL_MSG_BARBERS_CB)],
-            [types.InlineKeyboardButton(text="Hamma uchun", callback_data=SPECIAL_MSG_ALL_CB)],
+            [types.InlineKeyboardButton(text="✉️ Adminlar uchun", callback_data=SPECIAL_MSG_ADMINS_CB)],
+            [types.InlineKeyboardButton(text="✉️ Barberlar uchun", callback_data=SPECIAL_MSG_BARBERS_CB)],
+            [types.InlineKeyboardButton(text="✉️ Hamma uchun", callback_data=SPECIAL_MSG_ALL_CB)],
         ]
     )
 
@@ -139,7 +139,7 @@ async def send_broadcast(message: types.Message, state: FSMContext):
     await state.clear()
 
     if sent == 0:
-        return await message.answer("Xabar yuborilmadi.")
+        return await message.answer("❌ Xabar yuborilmadi.")
     if failed == 0:
         return await message.answer(f"Xabar muvaffaqiyatli yuborildi ✅\nYuborildi: {sent} ta")
 

@@ -4,7 +4,7 @@ from typing import Optional
 
 from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 
 from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyboard
 from keyboards.main_menu import get_main_menu
@@ -171,7 +171,12 @@ async def start_user_edit_inline(callback: types.CallbackQuery, state: FSMContex
         return
 
     await state.set_state(UserState.waiting_for_new_fullname)
-    await callback.message.answer("✏️ Yangi to'liq ismingizni kiriting:")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer(
+            "✏️ Yangi to'liq ismingizni kiriting:",
+            reply_markup=ReplyKeyboardRemove(),
+        )
     await callback.answer()
 
 
@@ -235,15 +240,15 @@ async def process_new_phone(message: types.Message, state: FSMContext):
     )
 
 
-@router.message(F.text == "❌ Foydalanuvchi ma'lumotlarini o'chirish")
-async def delete_user_data(message: types.Message):
-    user_id = message.from_user.id
-    deleted = await delete_user(user_id)
-    keyboard = await get_dynamic_main_keyboard(user_id)
+# @router.message(F.text == "❌ Foydalanuvchi ma'lumotlarini o'chirish")
+# async def delete_user_data(message: types.Message):
+#     user_id = message.from_user.id
+#     deleted = await delete_user(user_id)
+#     keyboard = await get_dynamic_main_keyboard(user_id)
 
-    if deleted:
-        await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o'chirildi!", reply_markup=keyboard)
-    else:
-        await message.answer("⚠️ Foydalanuvchi topilmadi yoki o'chirishda xatolik yuz berdi.", reply_markup=keyboard)
+#     if deleted:
+#         await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o'chirildi!", reply_markup=keyboard)
+#     else:
+#         await message.answer("⚠️ Foydalanuvchi topilmadi yoki o'chirishda xatolik yuz berdi.", reply_markup=keyboard)
 
-    await message.answer("Quyidagi menyudan birini tanlang:", reply_markup=get_main_menu())
+#     await message.answer("Quyidagi menyudan birini tanlang:", reply_markup=get_main_menu())

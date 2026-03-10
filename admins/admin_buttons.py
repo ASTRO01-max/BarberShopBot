@@ -1,5 +1,6 @@
 # admins/admin_buttons.py
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton 
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 ADMIN_MENU_TEXT = "👨‍💻 Admin"
 ADMIN_ADD_TEXT = "➕ Admin qo'shish"
@@ -71,6 +72,20 @@ def get_info_inline_actions_kb() -> InlineKeyboardMarkup:
         ]
     )
 
+
+def get_main_menu():
+    builder = InlineKeyboardBuilder()
+    buttons = [
+        ("🏷 chegirma qo'yish", "discount"),
+        ("💈 ", "services"),
+        ("💈 Barberlar", "barbers"),
+        ("ℹ️ Ma'lumot / Kontaktlar", "contact")
+
+    ]
+    for text, data in buttons:
+        builder.button(text=text, callback_data=data)
+    builder.adjust(1)
+    return builder.as_markup()
 
 markup = ReplyKeyboardMarkup(
     keyboard=[
