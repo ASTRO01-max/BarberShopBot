@@ -117,8 +117,9 @@ class SuperAdmins(Base):
 
 class Info(Base):
     __tablename__ = "info"
+
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    # Telefon va aloqa kanallari
+    # Aloqa kanallari
     telegram = Column(String(150), nullable=True)       # @username yoki link
     instagram = Column(String(150), nullable=True)      # link yoki username
     website = Column(String(200), nullable=True)        # optional
@@ -134,7 +135,20 @@ class Info(Base):
     # Ish vaqti
     work_time_text = Column(String(200), nullable=True) # “09:00–21:00”
 
-    
+
+class InfoExpanded(Base):
+    __tablename__ = "info_expanded"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    phone_number = Column(String(30), nullable=True)
+    discount = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<InfoExpanded id={self.id} phone_number={self.phone_number}>"
+
+
 class BarberOrderInbox(Base):
     __tablename__ = "barber_order_inbox"
 

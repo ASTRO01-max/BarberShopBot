@@ -2,6 +2,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+# Admin bo'lim(panel) tumalari
 ADMIN_MENU_TEXT = "👨‍💻 Admin"
 ADMIN_ADD_TEXT = "➕ Admin qo'shish"
 ADMIN_DEL_TEXT = "➖ Admin o'chirish"
@@ -25,8 +26,10 @@ BARBER_DEL_CB = "barber:del"
 INFO_MENU_TEXT = "ℹ️ Info"
 INFO_ADD_TEXT = "ℹ️ Info kiritish"
 INFO_EDIT_TEXT = "✏️ Info tahrirlash"
+INFO_DELETE_TEXT = "❌ Info o'chirish"
 INFO_ADD_CB = "info:add"
 INFO_EDIT_CB = "info:edit"
+INFO_DELETE_CB = "info:delete"
 
 
 def get_admin_inline_actions_kb() -> InlineKeyboardMarkup:

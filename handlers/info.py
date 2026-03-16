@@ -124,8 +124,7 @@ def _pretty_text(info) -> str:
     website_raw = getattr(info, "website", None)
 
     # Telefonlar
-    phone1 = _safe(getattr(info, "phone", None))
-    phone2 = _safe(getattr(info, "phone2", None))
+    phone = _safe(getattr(info, "phone", None))
 
     # Manzil
     region = _safe(getattr(info, "region", None))
@@ -147,12 +146,8 @@ def _pretty_text(info) -> str:
     website_show = web or _safe(website_raw)
 
     phones_block = []
-    if phone1 != "—":
-        phones_block.append(f"📞 <b>Telefon 1:</b> {phone1}")
-    if phone2 != "—":
-        phones_block.append(f"📞 <b>Telefon 2:</b> {phone2}")
-    if not phones_block:
-        phones_block.append("📞 <b>Telefon:</b> —")
+    if phone != "—":
+        phones_block.append(f"📞 <b>Telefon 1:</b> {phone}")
 
     return (
         f"ℹ️ <b>{title}</b>\n"

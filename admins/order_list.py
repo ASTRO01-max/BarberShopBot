@@ -1,5 +1,6 @@
 # admins/order_list.py
 from aiogram import Router, types, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
@@ -8,13 +9,8 @@ from sql.models import Order, Services, Barbers
 from sqlalchemy import func
 
 router = Router()
-ORDERS_PER_PAGE = 1
 CHECK_ORDERS_PER_PAGE = 1
 
-
-EDIT_ORDERS_TEXT = "📝 Navbatlarni tahrirlash"
-CHECK_ORDERS_TEXT = "🔍 Navbatlarni tekshirish"
-EDIT_ORDERS_CB = "orders:edit"
 CHECK_ORDERS_CB = "orders:check"
 CHECK_PAGE_CB = "orders_page"
 CHECK_JUMP5_CB = "orders_jump5"
@@ -23,16 +19,6 @@ CHECK_GOTO_CB = "orders_goto"
 CHECK_SEARCH_MODE_CB = "orders_search_mode"
 CHECK_BACK_CB = "orders_back_to_pagination"
 BACK_TO_LIST_CB = "orders_back_to_list"
-
-MODE_VIEW = "view"
-MODE_EDIT = "edit"
-
-EDIT_PAGE_CB = "orders_edit_page"
-EDIT_JUMP5_CB = "orders_edit_jump5"
-EDIT_JUMP10_CB = "orders_edit_jump10"
-EDIT_GOTO_CB = "orders_edit_goto"
-EDIT_SEARCH_MODE_CB = "orders_edit_search_mode"
-EDIT_BACK_CB = "orders_edit_back_to_pagination"
 EDIT_DELETE_CB = "orders_delete"
 
 
@@ -41,6 +27,14 @@ def _to_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+async def _safe_edit_message_text(message, text: str, reply_markup=None):
+    try:
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
 
 
 async def _prepare_order_rows(orders):
@@ -124,52 +118,8 @@ def _page_window(page: int, total_pages: int, window: int = 20):
     return list(range(start, end + 1))
 
 
-def _mode_callbacks(mode: str):
-    if mode == MODE_EDIT:
-        return {
-            "page": EDIT_PAGE_CB,
-            "jump5": EDIT_JUMP5_CB,
-            "jump10": EDIT_JUMP10_CB,
-            "goto": EDIT_GOTO_CB,
-            "search_mode": EDIT_SEARCH_MODE_CB,
-            "back": EDIT_BACK_CB,
-        }
-    return {
-        "page": CHECK_PAGE_CB,
-        "jump5": CHECK_JUMP5_CB,
-        "jump10": CHECK_JUMP10_CB,
-        "goto": CHECK_GOTO_CB,
-        "search_mode": CHECK_SEARCH_MODE_CB,
-        "back": CHECK_BACK_CB,
-    }
-
-
-def _resolve_mode_from_callback(data: str, default_mode: str = MODE_VIEW) -> str:
-    if data.startswith(
-        (
-            f"{EDIT_PAGE_CB}:",
-            f"{EDIT_JUMP5_CB}:",
-            f"{EDIT_JUMP10_CB}:",
-            f"{EDIT_GOTO_CB}:",
-            f"{EDIT_DELETE_CB}:",
-        )
-    ) or data in (EDIT_SEARCH_MODE_CB, EDIT_BACK_CB):
-        return MODE_EDIT
-    if data.startswith(
-        (
-            f"{CHECK_PAGE_CB}:",
-            f"{CHECK_JUMP5_CB}:",
-            f"{CHECK_JUMP10_CB}:",
-            f"{CHECK_GOTO_CB}:",
-        )
-    ) or data in (CHECK_SEARCH_MODE_CB, CHECK_BACK_CB):
-        return MODE_VIEW
-    return default_mode
-
-
 async def _clear_orders_pagination_state(state: FSMContext):
     keys_to_remove = {
-        "orders_mode",
         "orders_current_page",
         "orders_total_orders",
         "orders_total_pages",
@@ -189,60 +139,40 @@ def _build_check_orders_keyboard(
     page: int,
     total_pages: int,
     search_mode: bool = False,
-    mode: str = MODE_VIEW,
     order_id: int | None = None,
 ):
-    callbacks = _mode_callbacks(mode)
+    delete_callback = f"{EDIT_DELETE_CB}:{order_id}" if order_id is not None else BACK_TO_LIST_CB
+    search_callback = CHECK_BACK_CB if search_mode else CHECK_SEARCH_MODE_CB
 
-    rows = []
-
-    if mode == MODE_EDIT and order_id is not None:
-        rows.append(
-            [InlineKeyboardButton(text="❌ O'chirish", callback_data=f"{EDIT_DELETE_CB}:{order_id}")]
-        )
+    rows = [
+        [
+            InlineKeyboardButton(text="🔍 Qidirish", callback_data=search_callback),
+            InlineKeyboardButton(text="❌ O'chirish", callback_data=delete_callback),
+        ]
+    ]
 
     if total_pages > 1:
-        nav_row = []
-        if page > 1:
-            nav_row.append(
-                InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"{callbacks['page']}:{page - 1}")
-            )
-        if page < total_pages:
-            nav_row.append(
-                InlineKeyboardButton(text="➡️  Keyingi", callback_data=f"{callbacks['page']}:{page + 1}")
-            )
-        if nav_row:
-            rows.append(nav_row)
-
-        if not search_mode:
-            jump_row = []
-            if total_pages > 5 and page > 5:
-                jump_row.append(
-                    InlineKeyboardButton(text="⬅️ 5", callback_data=f"{callbacks['jump5']}:{page - 5}")
-                )
-            if total_pages > 5 and page + 5 <= total_pages:
-                jump_row.append(
-                    InlineKeyboardButton(text="5 ➡️", callback_data=f"{callbacks['jump5']}:{page + 5}")
-                )
-            if total_pages > 10 and page > 10:
-                jump_row.append(
-                    InlineKeyboardButton(text="⬅️ 10", callback_data=f"{callbacks['jump10']}:{page - 10}")
-                )
-            if total_pages > 10 and page + 10 <= total_pages:
-                jump_row.append(
-                    InlineKeyboardButton(text="10 ➡️", callback_data=f"{callbacks['jump10']}:{page + 10}")
-                )
-            if jump_row:
-                rows.append(jump_row)
-
-            rows.append([InlineKeyboardButton(text="🔍", callback_data=callbacks["search_mode"])])
+        rows.append(
+            [
+                InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"{CHECK_PAGE_CB}:{page - 1}"),
+                InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"{CHECK_PAGE_CB}:{page + 1}"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="⬅️ 10", callback_data=f"{CHECK_JUMP10_CB}:{page - 10}"),
+                InlineKeyboardButton(text="⬅️ 5", callback_data=f"{CHECK_JUMP5_CB}:{page - 5}"),
+                InlineKeyboardButton(text="5 ➡️", callback_data=f"{CHECK_JUMP5_CB}:{page + 5}"),
+                InlineKeyboardButton(text="➡️ 10", callback_data=f"{CHECK_JUMP10_CB}:{page + 10}"),
+            ]
+        )
 
         if search_mode:
             pages = _page_window(page, total_pages, window=20)
             page_rows = []
             row = []
             for p in pages:
-                row.append(InlineKeyboardButton(text=str(p), callback_data=f"{callbacks['goto']}:{p}"))
+                row.append(InlineKeyboardButton(text=str(p), callback_data=f"{CHECK_GOTO_CB}:{p}"))
                 if len(row) == 10:
                     page_rows.append(row)
                     row = []
@@ -250,12 +180,10 @@ def _build_check_orders_keyboard(
                 page_rows.append(row)
             rows.extend(page_rows)
 
-    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=BACK_TO_LIST_CB)])
-
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
-async def get_check_orders_page(page: int, search_mode: bool = False, mode: str = MODE_VIEW):
+async def get_check_orders_page(page: int, search_mode: bool = False):
     try:
         async with async_session() as session:
             total_orders = await session.scalar(select(func.count(Order.id)))
@@ -299,139 +227,55 @@ async def get_check_orders_page(page: int, search_mode: bool = False, mode: str 
         f"⏰ <b>Navbat olingan vaqt:</b> {row['booked_time']}\n"
     )
     if row.get("status") is not None:
-        response += f"📌 <b>Holat:</b> {row['status']}\n"
+        response += f"📊 <b>Holat:</b> {row['status']}\n"
 
-    order_id = _to_int(row.get("id")) if mode == MODE_EDIT else None
+    order_id = _to_int(row.get("id"))
     markup = _build_check_orders_keyboard(
         page,
         total_pages,
         search_mode=search_mode,
-        mode=mode,
         order_id=order_id,
     )
     return response, markup, total_orders, total_pages, page
 
 
-async def get_orders_page(page: int):
-    offset = max(0, page) * ORDERS_PER_PAGE
-
-    try:
-        async with async_session() as session:
-            result = await session.execute(
-                select(Order)
-                .order_by(Order.date.desc(), Order.time.desc())
-                .offset(offset)
-                .limit(ORDERS_PER_PAGE)
-            )
-            orders = result.scalars().all()
-
-            total_orders = await session.scalar(select(func.count(Order.id)))
-            total_orders = int(total_orders or 0)
-    except Exception as e:
-        # Log yoki print — developmentda ko'rish
-        print("get_orders_page DB error:", repr(e))
-        return "❗ Navbatlar olishda xatolik yuz berdi.", None, 0
-
-    if not orders:
-        return "📂 Navbatlar topilmadi.", None, total_orders
-
-    order_rows = await _prepare_order_rows(orders)
-    response = f"📋 <b>Navbatlar ro'yxati (sahifa {page + 1})</b>\n\n"
-    for idx, row in enumerate(order_rows, start=offset + 1):
-        response += (
-            f"📌 <b>Navbat {idx}</b>\n"
-            f"👤 <b>Mijoz:</b> {row['fullname']}\n"
-            f"📞 <b>Tel:</b> {row['phonenumber']}\n"
-            f"💈 <b>Barber:</b> {row['barber']}\n"
-            f"✂️ <b>Xizmat:</b> {row['service']}\n"
-            f"🗓 <b>Sana:</b> {row['date']}\n"
-            f"⏰ <b>Vaqt:</b> {row['time']}\n"
-            f"🗓 <b>Navbat olingan sana:</b> {row['booked_date']}\n"
-            f"🗓 <b>Navbat olingan vaqt:</b> {row['booked_time']}\n\n"
-        )
-
-    # Tugmalarni tayyorlash - har birini alohida qatorda qo'yiladi
-    rows = []
-    nav_buttons = []
-
-    # Oldingi sahifa mavjud bo'lsa -> qo'shamiz
-    if page > 0:
-        nav_buttons.append(
-            InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"prev_page:{page-1}")
-        )
-
-    # Keyingi sahifa mavjud bo'lsa -> qo'shamiz
-    if offset + ORDERS_PER_PAGE < total_orders:
-        nav_buttons.append(
-            InlineKeyboardButton(text="➡️  Keyingi", callback_data=f"next_page:{page+1}")
-        )
-
-    # Agar kamida bitta tugma bo'lsa, barchasini bitta qatorda joylaymiz
-    if nav_buttons:
-        rows = [nav_buttons]
-
-    rows.extend(
-        [
-            [InlineKeyboardButton(text=EDIT_ORDERS_TEXT, callback_data=EDIT_ORDERS_CB)],
-            [InlineKeyboardButton(text=CHECK_ORDERS_TEXT, callback_data=CHECK_ORDERS_CB)],
-        ]
-    )
-
-    markup = InlineKeyboardMarkup(inline_keyboard=rows)
-    return response, markup, total_orders
-
-
-# 🗂 Buyurtmalar ro'yxatini chiqarish
 @router.message(F.text == "📁 Buyurtmalar ro'yxati")
 async def show_all_orders(message: types.Message, state: FSMContext):
-    page = 0
-    response, markup, total = await get_orders_page(page)
-
-    msg = await message.answer(response, reply_markup=markup, parse_mode="HTML")
-    await state.update_data(current_page=page, current_msg=msg.message_id, total_orders=total)
-
-
-# 🔁 Sahifalar orasida silliq harakat
-@router.callback_query(F.data.startswith(("next_page", "prev_page")))
-async def paginate_orders(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    page = int(callback.data.split(":")[1])
-
-    response, markup, total = await get_orders_page(page)
-
-    # ❗ Xabarni yangidan yubormasdan silliq o‘zgartiramiz
-    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
-
-    await state.update_data(current_page=page, total_orders=total)
-    await callback.answer("⏳ Yangilanmoqda...", show_alert=False)
-
-
-@router.callback_query(F.data == EDIT_ORDERS_CB)
-async def orders_edit_callback(callback: types.CallbackQuery, state: FSMContext):
     page = 1
     response, markup, total_orders, total_pages, current_page = await get_check_orders_page(
-        page, search_mode=False, mode=MODE_EDIT
+        page, search_mode=False
     )
-    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
+
+    msg = await message.answer(response, reply_markup=markup, parse_mode="HTML")
     await state.update_data(
-        orders_mode=MODE_EDIT,
+        current_page=current_page,
+        current_msg=msg.message_id,
+        total_orders=total_orders,
         orders_current_page=current_page,
         orders_total_orders=total_orders,
         orders_total_pages=total_pages,
         orders_search_mode=False,
+        check_current_page=current_page,
+        check_total_orders=total_orders,
+        check_total_pages=total_pages,
+        check_search_mode=False,
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data == CHECK_ORDERS_CB)
 async def orders_check_callback(callback: types.CallbackQuery, state: FSMContext):
-    page = 1
+    state_data = await state.get_data()
+    page = state_data.get("orders_current_page", state_data.get("check_current_page", 1))
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+
     response, markup, total_orders, total_pages, current_page = await get_check_orders_page(
-        page, search_mode=False, mode=MODE_VIEW
+        page, search_mode=False
     )
-    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
+    await _safe_edit_message_text(callback.message, response, reply_markup=markup)
     await state.update_data(
-        orders_mode=MODE_VIEW,
         orders_current_page=current_page,
         orders_total_orders=total_orders,
         orders_total_pages=total_pages,
@@ -446,11 +290,24 @@ async def orders_check_callback(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data == BACK_TO_LIST_CB)
 async def orders_back_to_list_callback(callback: types.CallbackQuery, state: FSMContext):
-    page = 0
-    response, markup, total = await get_orders_page(page)
-    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
+    page = 1
+    response, markup, total_orders, total_pages, current_page = await get_check_orders_page(
+        page, search_mode=False
+    )
+    await _safe_edit_message_text(callback.message, response, reply_markup=markup)
     await _clear_orders_pagination_state(state)
-    await state.update_data(current_page=page, total_orders=total)
+    await state.update_data(
+        current_page=current_page,
+        total_orders=total_orders,
+        orders_current_page=current_page,
+        orders_total_orders=total_orders,
+        orders_total_pages=total_pages,
+        orders_search_mode=False,
+        check_current_page=current_page,
+        check_total_orders=total_orders,
+        check_total_pages=total_pages,
+        check_search_mode=False,
+    )
     await callback.answer()
 
 
@@ -463,25 +320,18 @@ async def orders_back_to_list_callback(callback: types.CallbackQuery, state: FSM
             f"{CHECK_GOTO_CB}:",
             CHECK_SEARCH_MODE_CB,
             CHECK_BACK_CB,
-            f"{EDIT_PAGE_CB}:",
-            f"{EDIT_JUMP5_CB}:",
-            f"{EDIT_JUMP10_CB}:",
-            f"{EDIT_GOTO_CB}:",
-            EDIT_SEARCH_MODE_CB,
-            EDIT_BACK_CB,
         )
     )
 )
 async def paginate_check_orders(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data or ""
     state_data = await state.get_data()
-    mode = _resolve_mode_from_callback(data, default_mode=state_data.get("orders_mode", MODE_VIEW))
     search_mode = bool(state_data.get("orders_search_mode", False))
     page = state_data.get("orders_current_page", state_data.get("check_current_page", 1))
 
-    if data in (CHECK_SEARCH_MODE_CB, EDIT_SEARCH_MODE_CB):
+    if data == CHECK_SEARCH_MODE_CB:
         search_mode = True
-    elif data in (CHECK_BACK_CB, EDIT_BACK_CB):
+    elif data == CHECK_BACK_CB:
         search_mode = False
     else:
         try:
@@ -494,25 +344,21 @@ async def paginate_check_orders(callback: types.CallbackQuery, state: FSMContext
             page = int(page)
         except (TypeError, ValueError):
             page = 1
+
     response, markup, total_orders, total_pages, current_page = await get_check_orders_page(
-        page, search_mode=search_mode, mode=mode
+        page, search_mode=search_mode
     )
-    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
-    update_payload = {
-        "orders_mode": mode,
-        "orders_current_page": current_page,
-        "orders_total_orders": total_orders,
-        "orders_total_pages": total_pages,
-        "orders_search_mode": search_mode,
-    }
-    if mode == MODE_VIEW:
-        update_payload.update(
-            check_current_page=current_page,
-            check_total_orders=total_orders,
-            check_total_pages=total_pages,
-            check_search_mode=search_mode,
-        )
-    await state.update_data(**update_payload)
+    await _safe_edit_message_text(callback.message, response, reply_markup=markup)
+    await state.update_data(
+        orders_current_page=current_page,
+        orders_total_orders=total_orders,
+        orders_total_pages=total_pages,
+        orders_search_mode=search_mode,
+        check_current_page=current_page,
+        check_total_orders=total_orders,
+        check_total_pages=total_pages,
+        check_search_mode=search_mode,
+    )
     await callback.answer()
 
 
@@ -538,7 +384,7 @@ async def delete_order_from_edit_mode(callback: types.CallbackQuery, state: FSMC
         return
 
     state_data = await state.get_data()
-    page = state_data.get("orders_current_page", 1)
+    page = state_data.get("orders_current_page", state_data.get("check_current_page", 1))
     search_mode = bool(state_data.get("orders_search_mode", False))
     if not isinstance(page, int):
         try:
@@ -547,15 +393,18 @@ async def delete_order_from_edit_mode(callback: types.CallbackQuery, state: FSMC
             page = 1
 
     response, markup, total_orders, total_pages, current_page = await get_check_orders_page(
-        page, search_mode=search_mode, mode=MODE_EDIT
+        page, search_mode=search_mode
     )
-    await callback.message.edit_text(response, reply_markup=markup, parse_mode="HTML")
+    await _safe_edit_message_text(callback.message, response, reply_markup=markup)
     await state.update_data(
-        orders_mode=MODE_EDIT,
         orders_current_page=current_page,
         orders_total_orders=total_orders,
         orders_total_pages=total_pages,
         orders_search_mode=search_mode,
+        check_current_page=current_page,
+        check_total_orders=total_orders,
+        check_total_pages=total_pages,
+        check_search_mode=search_mode,
     )
     if deleted:
         await callback.answer("Navbat o'chirildi ✅", show_alert=False)

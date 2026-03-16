@@ -12,7 +12,6 @@ from .admin_buttons import (
     BARBER_DEL_CB,
     get_service_inline_actions_kb,
     get_barber_inline_actions_kb,
-    get_info_inline_actions_kb,
 )
 from .add_service import add_service_prompt
 from .service_shutdown import list_services_for_delete
@@ -36,8 +35,8 @@ async def open_barber_menu(message: types.Message, state: FSMContext):
 
 @router.message(F.text == INFO_MENU_TEXT)
 async def open_info_menu(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Info bo'limi:", reply_markup=get_info_inline_actions_kb())
+    from .info_handle import open_info_panel
+    await open_info_panel(message, state)
 
 
 @router.callback_query(F.data == SERVICE_ADD_CB)
