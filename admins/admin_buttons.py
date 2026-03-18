@@ -2,7 +2,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# Admin bo'lim(panel) tumalari
+# Admin bo'lim tumalari
 ADMIN_MENU_TEXT = "👨‍💻 Admin"
 ADMIN_ADD_TEXT = "➕ Admin qo'shish"
 ADMIN_DEL_TEXT = "➖ Admin o'chirish"

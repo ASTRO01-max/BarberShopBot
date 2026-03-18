@@ -1,4 +1,7 @@
-﻿from datetime import datetime
+# admins/info_hande.py
+from dataclasses import dataclass
+from datetime import datetime
+from html import escape
 
 from aiogram import F, Router, types
 from aiogram.filters import Command, StateFilter
@@ -18,6 +21,8 @@ router = Router()
 # info:nav:next:{current_page}
 INFO_NAV_PREFIX = "info:nav"
 INFO_NAV_NOOP_CB = f"{INFO_NAV_PREFIX}:noop"
+PAGE_TABLE_INFO = "info"
+PAGE_TABLE_EXPANDED = "info_expanded"
 
 # FSM data keys
 STATE_PAGE_KEY = "info_page"
@@ -37,6 +42,50 @@ class InfoFSM(StatesGroup):
     editing = State()
 
 
+@dataclass(frozen=True, slots=True)
+class InfoFieldSpec:
+    table: str
+    field: str
+    label: str
+    formatter: str = "text"
+
+
+@dataclass(slots=True)
+class InfoPageBundle:
+    total: int
+    page: int
+    spec: InfoFieldSpec
+    value: str
+    target_id: int | None
+
+
+INFO_FIELD_SPECS = [
+    InfoFieldSpec(PAGE_TABLE_INFO, "telegram", "✈️ Telegram"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "instagram", "📷 Instagram"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "website", "🔗 Website"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "region", "🏙 Hudud"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "district", "🏘 Tuman"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "street", "🛣 Ko'cha"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "address_text", "📍 Manzil"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "latitude", "🧭 Latitude"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "longitude", "🧭 Longitude"),
+    InfoFieldSpec(PAGE_TABLE_INFO, "work_time_text", "🕒 Ish vaqti"),
+]
+
+EXPANDED_FIELD_SPECS = [
+    InfoFieldSpec(PAGE_TABLE_EXPANDED, "phone_number", "📞 Telefon"),
+    InfoFieldSpec(PAGE_TABLE_EXPANDED, "discount", "💸 Chegirma"),
+    InfoFieldSpec(PAGE_TABLE_EXPANDED, "created_at", "📅 Yaratilgan", "datetime"),
+    InfoFieldSpec(PAGE_TABLE_EXPANDED, "updated_at", "♻️ Yangilangan", "datetime"),
+]
+
+PAGE_SPECS = INFO_FIELD_SPECS + EXPANDED_FIELD_SPECS
+PAGE_INDEX_BY_KEY = {(spec.table, spec.field): index for index, spec in enumerate(PAGE_SPECS)}
+TOTAL_PAGES = len(PAGE_SPECS)
+DEFAULT_PAGE = 0
+DEFAULT_EXPANDED_PAGE = PAGE_INDEX_BY_KEY[(PAGE_TABLE_EXPANDED, "phone_number")]
+
+
 def _to_int(value, default: int = 0) -> int:
     try:
         return int(value)
@@ -44,8 +93,10 @@ def _to_int(value, default: int = 0) -> int:
         return default
 
 
-def _safe_text(value: str | None) -> str:
-    text = (value or "").strip()
+def _safe_text(value) -> str:
+    if value is None:
+        return "—"
+    text = str(value).strip()
     return text if text else "—"
 
 
@@ -53,6 +104,16 @@ def _fmt_dt(value: datetime | None) -> str:
     if not value:
         return "—"
     return value.strftime("%d.%m.%Y %H:%M")
+
+
+def _normalize_page(page: int) -> int:
+    return page % TOTAL_PAGES if TOTAL_PAGES else 0
+
+
+def _normalize_expanded_page(page: int) -> int:
+    normalized = _normalize_page(page)
+    spec = PAGE_SPECS[normalized]
+    return normalized if spec.table == PAGE_TABLE_EXPANDED else DEFAULT_EXPANDED_PAGE
 
 
 def _parse_nav_callback(data: str) -> tuple[str | None, int]:
@@ -85,49 +146,32 @@ def _parse_target_callback(data: str, prefix: str) -> tuple[int | None, int | No
     return page, target_id
 
 
-def _extra_info_block(info_row: Info | None) -> str:
-    if not info_row:
-        return ""
-
-    lines: list[str] = []
-    address = _safe_text(getattr(info_row, "address_text", None))
-    work_time = _safe_text(getattr(info_row, "work_time_text", None))
-
-    if address != "—":
-        lines.append(f"📍 Manzil: {address}")
-    if work_time != "—":
-        lines.append(f"🕒 Ish vaqti: {work_time}")
-
-    if not lines:
-        return ""
-    return "\n\n" + "\n".join(lines)
+def _format_field_value(spec: InfoFieldSpec, obj: Info | InfoExpanded | None) -> str:
+    raw_value = getattr(obj, spec.field, None) if obj else None
+    if spec.formatter == "datetime":
+        return _fmt_dt(raw_value)
+    return _safe_text(raw_value)
 
 
-def _render_text(
-    total: int,
-    page: int,
-    item: InfoExpanded | None,
-    base_info: Info | None,
-) -> str:
-    if total <= 0 or item is None:
-        return (
-            "ℹ️ Info (0/0)\n\n"
-            "📭 Hozircha ma'lumot yo'q.\n"
-            "➕ Yangi info qo'shish uchun pastdagi tugmadan foydalaning."
-            + _extra_info_block(base_info)
-        )
+def _render_value_html(value: str) -> str:
+    safe_value = escape(value).replace("\n", "<br>")
+    return f"<blockquote>{safe_value}</blockquote>"
 
+
+def _render_text(bundle: InfoPageBundle) -> str:
     return (
-        f"ℹ️ Info ({page + 1}/{total})\n\n"
-        f"📞 Telefon: {_safe_text(item.phone_number)}\n"
-        f"💸 Chegirma: {_safe_text(item.discount)}\n"
-        f"📅 Yaratilgan: {_fmt_dt(item.created_at)}\n"
-        f"♻️ Yangilangan: {_fmt_dt(item.updated_at)}"
-        + _extra_info_block(base_info)
+        f"<b>{escape(bundle.spec.label)}</b>\n\n"
+        f"{_render_value_html(bundle.value)}\n"
+        f"<code>{bundle.page + 1}/{bundle.total}</code>"
     )
 
 
-def _build_keyboard(total: int, page: int, target_id: int | None) -> types.InlineKeyboardMarkup:
+def _build_keyboard(
+    total: int,
+    page: int,
+    spec: InfoFieldSpec,
+    target_id: int | None,
+) -> types.InlineKeyboardMarkup:
     nav_row = [
         types.InlineKeyboardButton(
             text="⬅️ Oldingi",
@@ -145,11 +189,11 @@ def _build_keyboard(total: int, page: int, target_id: int | None) -> types.Inlin
 
     rows = [nav_row]
 
-    if total <= 0 or not target_id:
+    if spec.table == PAGE_TABLE_EXPANDED and not target_id:
         rows.append(
             [types.InlineKeyboardButton(text="➕ ℹ️ Info kiritish", callback_data=INFO_ADD_CB)]
         )
-    else:
+    elif spec.table == PAGE_TABLE_EXPANDED and target_id:
         rows.append(
             [
                 types.InlineKeyboardButton(
@@ -172,31 +216,24 @@ async def _is_admin(tg_id: int) -> bool:
     return admin_id is not None
 
 
-async def _fetch_page_bundle(page: int) -> tuple[int, int, InfoExpanded | None, Info | None]:
+async def _fetch_page_bundle(page: int) -> InfoPageBundle:
     async with async_session() as session:
-        total = int(await session.scalar(select(func.count(InfoExpanded.id))) or 0)
         base_info = await session.get(Info, 1)
-
-        if total <= 0:
-            return 0, 0, None, base_info
-
-        normalized = page % total
         result = await session.execute(
-            select(InfoExpanded)
-            .order_by(InfoExpanded.id.asc())
-            .offset(normalized)
-            .limit(1)
+            select(InfoExpanded).order_by(InfoExpanded.id.asc()).limit(1)
         )
-        item = result.scalars().first()
+        expanded_item = result.scalars().first()
 
-        if item is None:
-            normalized = 0
-            result = await session.execute(
-                select(InfoExpanded).order_by(InfoExpanded.id.asc()).limit(1)
-            )
-            item = result.scalars().first()
-
-        return total, normalized, item, base_info
+    normalized = _normalize_page(page)
+    spec = PAGE_SPECS[normalized]
+    source_obj = base_info if spec.table == PAGE_TABLE_INFO else expanded_item
+    return InfoPageBundle(
+        total=TOTAL_PAGES,
+        page=normalized,
+        spec=spec,
+        value=_format_field_value(spec, source_obj),
+        target_id=getattr(expanded_item, "id", None),
+    )
 
 
 async def _fetch_by_id(target_id: int) -> InfoExpanded | None:
@@ -204,25 +241,7 @@ async def _fetch_by_id(target_id: int) -> InfoExpanded | None:
         return await session.get(InfoExpanded, target_id)
 
 
-async def _resolve_page_by_id(target_id: int) -> int:
-    if target_id <= 0:
-        return 0
-
-    async with async_session() as session:
-        total = int(await session.scalar(select(func.count(InfoExpanded.id))) or 0)
-        if total <= 0:
-            return 0
-
-        index = int(
-            await session.scalar(
-                select(func.count(InfoExpanded.id)).where(InfoExpanded.id < target_id)
-            )
-            or 0
-        )
-        return min(max(index, 0), total - 1)
-
-
-async def _state_page(state: FSMContext, default: int = 0) -> int:
+async def _state_page(state: FSMContext, default: int = DEFAULT_PAGE) -> int:
     data = await state.get_data()
     return _to_int(data.get(STATE_PAGE_KEY), default)
 
@@ -236,24 +255,43 @@ async def _safe_edit_or_answer(
         return
 
     try:
-        await message.edit_text(text, reply_markup=reply_markup)
+        await message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
     except Exception:
-        await message.answer(text, reply_markup=reply_markup)
+        await message.answer(
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
 
 
-async def _show_page_message(message: types.Message, state: FSMContext, page: int = 0) -> None:
-    total, normalized, item, base_info = await _fetch_page_bundle(page)
-    await state.update_data(**{STATE_PAGE_KEY: normalized})
-    text = _render_text(total, normalized, item, base_info)
-    kb = _build_keyboard(total, normalized, item.id if item else None)
-    await message.answer(text, reply_markup=kb)
+async def _show_page_message(message: types.Message, state: FSMContext, page: int = DEFAULT_PAGE) -> None:
+    bundle = await _fetch_page_bundle(page)
+    await state.update_data(**{STATE_PAGE_KEY: bundle.page})
+    text = _render_text(bundle)
+    kb = _build_keyboard(bundle.total, bundle.page, bundle.spec, bundle.target_id)
+    await message.answer(
+        text,
+        reply_markup=kb,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
-async def _show_page_callback(callback: types.CallbackQuery, state: FSMContext, page: int = 0) -> None:
-    total, normalized, item, base_info = await _fetch_page_bundle(page)
-    await state.update_data(**{STATE_PAGE_KEY: normalized})
-    text = _render_text(total, normalized, item, base_info)
-    kb = _build_keyboard(total, normalized, item.id if item else None)
+async def _show_page_callback(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    page: int = DEFAULT_PAGE,
+) -> None:
+    bundle = await _fetch_page_bundle(page)
+    await state.update_data(**{STATE_PAGE_KEY: bundle.page})
+    text = _render_text(bundle)
+    kb = _build_keyboard(bundle.total, bundle.page, bundle.spec, bundle.target_id)
     await _safe_edit_or_answer(callback.message, text, kb)
 
 
@@ -270,9 +308,8 @@ async def open_info_panel(message: types.Message, state: FSMContext) -> None:
         await message.answer("⛔ Bu bo'lim faqat adminlar uchun.")
         return
 
-    # Info bo'limiga kirganda avvalgi FSM jarayonlarini yopamiz.
     await state.clear()
-    await _show_page_message(message, state, page=0)
+    await _show_page_message(message, state, page=DEFAULT_PAGE)
 
 
 @router.message(F.text == INFO_MENU_TEXT)
@@ -296,16 +333,13 @@ async def info_navigate(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Noto'g'ri so'rov", show_alert=True)
         return
 
-    total, normalized, _, _ = await _fetch_page_bundle(current_page)
-    if total <= 0:
-        target_page = 0
-    elif action == "next":
-        target_page = (normalized + 1) % total
+    bundle = await _fetch_page_bundle(current_page)
+    if action == "next":
+        target_page = (bundle.page + 1) % bundle.total
     else:
-        target_page = (normalized - 1) % total
+        target_page = (bundle.page - 1) % bundle.total
 
-    # Sahifa o'zgarsa eski form-state bekor qilinadi.
-    old_page = await _state_page(state, default=0)
+    old_page = await _state_page(state, default=DEFAULT_PAGE)
     if old_page != target_page:
         await _clear_info_form_state(state, page=target_page)
 
@@ -319,16 +353,19 @@ async def info_add_start(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
 
-    total, _, _, _ = await _fetch_page_bundle(await _state_page(state, default=0))
-    if total > 0:
+    current_page = _normalize_expanded_page(
+        await _state_page(state, default=DEFAULT_EXPANDED_PAGE)
+    )
+    bundle = await _fetch_page_bundle(current_page)
+    if bundle.target_id:
         await callback.answer("Info mavjud. Tahrirlashdan foydalaning.", show_alert=True)
-        await _show_page_callback(callback, state, page=await _state_page(state, default=0))
+        await _show_page_callback(callback, state, page=current_page)
         return
 
     await state.set_state(InfoFSM.adding)
     await state.update_data(
         **{
-            STATE_PAGE_KEY: 0,
+            STATE_PAGE_KEY: current_page,
             STATE_TARGET_KEY: None,
             STATE_STEP_KEY: STEP_PHONE,
             STATE_PHONE_KEY: "",
@@ -347,41 +384,40 @@ async def info_edit_start(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
 
-    selected_page: int
-    target_id: int
-
     parsed_page, parsed_target_id = _parse_target_callback(callback.data or "", INFO_EDIT_CB)
+    current_page = _normalize_expanded_page(
+        parsed_page if parsed_page is not None else await _state_page(state, default=DEFAULT_EXPANDED_PAGE)
+    )
+
     if parsed_target_id:
-        target = await _fetch_by_id(parsed_target_id)
-        if not target:
-            await _clear_info_form_state(state, page=0)
-            await _show_page_callback(callback, state, page=0)
+        current = await _fetch_by_id(parsed_target_id)
+        if not current:
+            await _clear_info_form_state(state, page=current_page)
+            await _show_page_callback(callback, state, page=current_page)
             await callback.answer("Tanlangan info topilmadi.", show_alert=True)
             return
-        target_id = target.id
-        selected_page = await _resolve_page_by_id(target_id)
+        target_id = current.id
     else:
-        selected_page = await _state_page(state, default=0)
-        total, selected_page, target, _ = await _fetch_page_bundle(selected_page)
-        if total <= 0 or not target:
-            await _clear_info_form_state(state, page=0)
-            await _show_page_callback(callback, state, page=0)
+        bundle = await _fetch_page_bundle(current_page)
+        if not bundle.target_id:
+            await _clear_info_form_state(state, page=current_page)
+            await _show_page_callback(callback, state, page=current_page)
             await callback.answer("Tahrirlash uchun ma'lumot yo'q.", show_alert=True)
             return
-        target_id = target.id
+        current = await _fetch_by_id(bundle.target_id)
+        if not current:
+            await _clear_info_form_state(state, page=current_page)
+            await _show_page_callback(callback, state, page=current_page)
+            await callback.answer("Tanlangan info topilmadi.", show_alert=True)
+            return
+        target_id = current.id
 
-    await _clear_info_form_state(state, page=selected_page)
-
-    current = await _fetch_by_id(target_id)
-    if not current:
-        await _show_page_callback(callback, state, page=0)
-        await callback.answer("Tanlangan info topilmadi.", show_alert=True)
-        return
+    await _clear_info_form_state(state, page=current_page)
 
     await state.set_state(InfoFSM.editing)
     await state.update_data(
         **{
-            STATE_PAGE_KEY: selected_page,
+            STATE_PAGE_KEY: current_page,
             STATE_TARGET_KEY: target_id,
             STATE_STEP_KEY: STEP_PHONE,
             STATE_PHONE_KEY: "",
@@ -402,45 +438,38 @@ async def info_delete(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
 
-    selected_page, target_id = _parse_target_callback(callback.data or "", INFO_DELETE_CB)
+    parsed_page, target_id = _parse_target_callback(callback.data or "", INFO_DELETE_CB)
+    current_page = _normalize_expanded_page(
+        parsed_page if parsed_page is not None else await _state_page(state, default=DEFAULT_EXPANDED_PAGE)
+    )
 
     if not target_id:
-        selected_page = await _state_page(state, default=0)
-        total, selected_page, item, _ = await _fetch_page_bundle(selected_page)
-        if total <= 0 or not item:
-            await _clear_info_form_state(state, page=0)
-            await _show_page_callback(callback, state, page=0)
+        bundle = await _fetch_page_bundle(current_page)
+        if not bundle.target_id:
+            await _clear_info_form_state(state, page=current_page)
+            await _show_page_callback(callback, state, page=current_page)
             await callback.answer("O'chirish uchun ma'lumot yo'q.", show_alert=True)
             return
-        target_id = item.id
-
-    selected_page = _to_int(selected_page, 0)
+        target_id = bundle.target_id
 
     async with async_session() as session:
         try:
             obj = await session.get(InfoExpanded, target_id)
             if not obj:
                 await callback.answer("Tanlangan info topilmadi.", show_alert=True)
-                await _clear_info_form_state(state, page=0)
-                await _show_page_callback(callback, state, page=0)
+                await _clear_info_form_state(state, page=current_page)
+                await _show_page_callback(callback, state, page=current_page)
                 return
 
             await session.delete(obj)
             await session.commit()
-
-            total_after = int(await session.scalar(select(func.count(InfoExpanded.id))) or 0)
         except SQLAlchemyError:
             await session.rollback()
             await callback.answer("O'chirishda xatolik yuz berdi.", show_alert=True)
             return
 
-    if total_after <= 0:
-        target_page = 0
-    else:
-        target_page = min(max(selected_page, 0), total_after - 1)
-
-    await _clear_info_form_state(state, page=target_page)
-    await _show_page_callback(callback, state, page=target_page)
+    await _clear_info_form_state(state, page=current_page)
+    await _show_page_callback(callback, state, page=current_page)
     await callback.answer("✅ Info o'chirildi.")
 
 
@@ -451,7 +480,7 @@ async def cancel_info_form(message: types.Message, state: FSMContext):
         await message.answer("⛔ Bu bo'lim faqat adminlar uchun.")
         return
 
-    page = await _state_page(state, default=0)
+    page = await _state_page(state, default=DEFAULT_PAGE)
     await state.clear()
     await message.answer("❌ Jarayon bekor qilindi.")
     await _show_page_message(message, state, page=page)
@@ -472,12 +501,11 @@ async def process_info_form(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     data = await state.get_data()
 
-    page = _to_int(data.get(STATE_PAGE_KEY), 0)
+    page = _normalize_expanded_page(_to_int(data.get(STATE_PAGE_KEY), DEFAULT_EXPANDED_PAGE))
     target_id = _to_int(data.get(STATE_TARGET_KEY), 0)
     step = data.get(STATE_STEP_KEY)
 
     if step not in {STEP_PHONE, STEP_DISCOUNT}:
-        # Noto'g'ri state bo'lsa, crash qilmasdan reset qilamiz.
         await state.clear()
         await message.answer("⚠️ Jarayon qayta tiklandi.")
         await _show_page_message(message, state, page=page)
@@ -505,28 +533,24 @@ async def process_info_form(message: types.Message, state: FSMContext):
     if current_state == InfoFSM.adding.state:
         async with async_session() as session:
             try:
-                # Add faqat bo'sh holatda ruxsat etiladi.
                 total = int(await session.scalar(select(func.count(InfoExpanded.id))) or 0)
                 if total > 0:
                     await state.clear()
                     await message.answer("⚠️ Info mavjud. Yangi qo'shish o'rniga tahrirlashdan foydalaning.")
-                    await _show_page_message(message, state, page=0)
+                    await _show_page_message(message, state, page=page)
                     return
 
                 new_item = InfoExpanded(phone_number=phone_value, discount=text)
                 session.add(new_item)
                 await session.commit()
-
-                new_id = _to_int(getattr(new_item, "id", 0), 0)
             except SQLAlchemyError:
                 await session.rollback()
                 await message.answer("❌ Saqlashda xatolik yuz berdi.")
                 return
 
-        target_page = await _resolve_page_by_id(new_id)
         await state.clear()
         await message.answer("✅ Info saqlandi.")
-        await _show_page_message(message, state, page=target_page)
+        await _show_page_message(message, state, page=page)
         return
 
     if current_state == InfoFSM.editing.state:
@@ -542,7 +566,7 @@ async def process_info_form(message: types.Message, state: FSMContext):
                 if not row:
                     await state.clear()
                     await message.answer("⚠️ Tanlangan info topilmadi.")
-                    await _show_page_message(message, state, page=0)
+                    await _show_page_message(message, state, page=page)
                     return
 
                 row.phone_number = phone_value
@@ -553,12 +577,11 @@ async def process_info_form(message: types.Message, state: FSMContext):
                 await message.answer("❌ Yangilashda xatolik yuz berdi.")
                 return
 
-        fresh_page = await _resolve_page_by_id(target_id)
         await state.clear()
         await message.answer("✅ Info yangilandi.")
-        await _show_page_message(message, state, page=fresh_page)
+        await _show_page_message(message, state, page=page)
         return
 
     await state.clear()
     await message.answer("⚠️ Noma'lum holat. Jarayon bekor qilindi.")
-    await _show_page_message(message, state, page=0)
+    await _show_page_message(message, state, page=page)
