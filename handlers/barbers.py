@@ -3,8 +3,9 @@ from aiogram import Router, types
 from sqlalchemy.future import select
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from handlers.barber_cards import get_barber_card_content
 from sql.db import async_session
-from sql.models import Barbers, BarberPhotos
+from sql.models import Barbers
 from keyboards.booking_keyboards import back_button
 
 router = Router()
@@ -49,38 +50,11 @@ def barber_nav_keyboard(index: int, total: int, barber_id: int, is_paused: bool)
 
 async def send_barber(callback: types.CallbackQuery, barbers, index: int):
     barber = barbers[index]
-
-    lines = []
-
-    # Ism
-    full_name = f"{barber.barber_first_name or ''} {barber.barber_last_name or ''}".strip()
-    lines.append(f"👨‍🎤 <b>{full_name}</b>\n")
-
-    # Status
-    if getattr(barber, "is_paused", False):
-        lines.append("ℹ️ <b>Holati:</b> ⛔️ Bugun ishlamaydi\n")
-    else:
-        lines.append("ℹ️ <b>Holati:</b> 🕒 Bugun ishda\n")
-
-    # Faqat mavjud bo'lgan maydonlar
-    if barber.experience:
-        lines.append(f"💼 <b>Tajribasi:</b> {barber.experience}\n")
-
-    if barber.work_days:
-        lines.append(f"📅 <b>Ish kunlari:</b> {barber.work_days}\n")
-
-    if barber.work_time:
-        lines.append(f"⏰ <b>Ish vaqti:</b> {barber.work_time}\n")
-
-    if barber.breakdown:
-        lines.append(f"⏸️ <b>Tanafus vaqti:</b> {barber.breakdown}\n")
-
-    if barber.phone:
-        lines.append(f"📞 <b>Aloqa:</b> <code>{barber.phone}</code>\n")
-
-    lines.append(f"\n📌 <i>({index + 1} / {len(barbers)})</i>")
-
-    caption = "".join(lines)
+    caption, barber_photo = await get_barber_card_content(
+        barber,
+        include_status=True,
+        position=(index + 1, len(barbers)),
+    )
 
     keyboard = barber_nav_keyboard(
         index,
@@ -88,15 +62,6 @@ async def send_barber(callback: types.CallbackQuery, barbers, index: int):
         barber.id,
         getattr(barber, "is_paused", False)
     )
-
-    async with async_session() as session:
-        result = await session.execute(
-            select(BarberPhotos.photo)
-            .where(BarberPhotos.barber_id == barber.id)
-            .order_by(BarberPhotos.id.desc())
-            .limit(1)
-        )
-        barber_photo = result.scalar()
 
     if barber_photo:
         try:

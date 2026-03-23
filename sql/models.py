@@ -182,4 +182,15 @@ class BarberExpanded(Base):
         index=True,
     )
     barber_includes = Column(JSON, nullable=False, default=list)
+
+
+class BarberProfileSettings(Base):
+    __tablename__ = "barber_profile_settings"
+
+    barber_id = Column(
+        BigInteger,
+        ForeignKey("barbers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    hidden_fields = Column(JSON, nullable=False, default=list)
     

@@ -58,6 +58,74 @@ def get_barber_menu(hide_pause: bool = False):
     )
 
 
+def get_barber_inline_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👤 Profil", callback_data="barber_profile_open")]
+        ]
+    )
+
+
+def get_barber_profile_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🖼 Rasmni o'zgartirish",
+                    callback_data="barber_profile_edit_photo",
+                ),
+                InlineKeyboardButton(
+                    text="✏️ Ma'lumotni o'zgartirish",
+                    callback_data="barber_profile_edit_info",
+                ),
+            ],
+            [InlineKeyboardButton(text="⬅️ Panelga qaytish", callback_data="barber_menu")],
+        ]
+    )
+
+
+def get_barber_profile_fields_keyboard(hidden_fields: set[str] | None = None) -> InlineKeyboardMarkup:
+    hidden = hidden_fields or set()
+
+    def label(emoji: str, text: str, hidden_key: str | None = None) -> str:
+        if hidden_key and hidden_key in hidden:
+            return f"🙈 {text}"
+        return f"{emoji} {text}"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👤 Ism familiya", callback_data="barber_profile_field_name")],
+            [
+                InlineKeyboardButton(
+                    text=label("💼", "Tajriba", "experience"),
+                    callback_data="barber_profile_field_experience",
+                ),
+                InlineKeyboardButton(
+                    text=label("📞", "Aloqa", "phone"),
+                    callback_data="barber_profile_field_phone",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=label("📅", "Ish kunlari", "work_days"),
+                    callback_data="barber_profile_field_work_days",
+                ),
+                InlineKeyboardButton(
+                    text=label("⏰", "Ish vaqti", "work_time"),
+                    callback_data="barber_profile_field_work_time",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=label("⏸️", "Tanaffus", "breakdown"),
+                    callback_data="barber_profile_field_breakdown",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Profilga qaytish", callback_data="barber_profile_open")],
+        ]
+    )
+
+
 def get_schedule_keyboard():
     """Ish jadvali sozlamalari"""
     return InlineKeyboardMarkup(
@@ -92,10 +160,8 @@ def get_pause_confirm_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Ha, to'xtataman", callback_data="barber_pause_confirm")
-            ],
-            [
-                InlineKeyboardButton(text="❌ Yo'q, bekor qilish", callback_data="barber_menu")
+                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="barber_pause_confirm"),
+                InlineKeyboardButton(text="✖️ Bekor qilish", callback_data="barber_pause_cancel"),
             ],
         ]
     )

@@ -17,11 +17,12 @@ from sqlalchemy import or_, select
 from keyboards import booking_keyboards
 from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyboard
 from keyboards.main_menu import get_main_menu
+from handlers.barber_cards import barber_full_name, get_barber_card_content
 from sql.db import async_session
 from sql.db_barbers_expanded import get_barbers_by_service
 from sql.db_order_utils import save_order
 from sql.db_users_utils import get_user, save_user
-from sql.models import BarberPhotos, Barbers, Order, Services
+from sql.models import Barbers, Order, Services
 from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.emoji_map import SERVICE_EMOJIS
 from utils.states import UserState
@@ -343,12 +344,6 @@ def _barber_nav_keyboard(index: int, total: int, service_id: str, barber_id: str
     )
 
 
-def _barber_full_name(barber: Barbers) -> str:
-    return " ".join(
-        [part for part in [barber.barber_first_name, barber.barber_last_name] if part]
-    ).strip() or f"Barber #{barber.id}"
-
-
 async def _fetch_services():
     async with async_session() as session:
         result = await session.execute(select(Services).order_by(Services.id.asc()))
@@ -380,17 +375,6 @@ async def _fetch_active_barbers_by_service(service_id: str):
 async def _is_barber_available_for_service(service_id: str, barber_id: str) -> bool:
     barbers = await _fetch_active_barbers_by_service(service_id)
     return any(str(barber.id) == str(barber_id) for barber in barbers)
-
-
-async def _fetch_latest_barber_photo(barber_id: int):
-    async with async_session() as session:
-        result = await session.execute(
-            select(BarberPhotos.photo)
-            .where(BarberPhotos.barber_id == barber_id)
-            .order_by(BarberPhotos.id.desc())
-            .limit(1)
-        )
-        return result.scalar()
 
 
 async def _resolve_service_id(raw_value: str | None) -> str | None:
@@ -428,7 +412,7 @@ async def _resolve_barber_name(barber_id: str) -> str:
         barber = None
         if str(barber_id).isdigit():
             barber = await session.get(Barbers, int(barber_id))
-    return _barber_full_name(barber) if barber else str(barber_id)
+    return barber_full_name(barber) if barber else str(barber_id)
 
 
 async def _render_catalog_callback(
@@ -558,27 +542,14 @@ async def _show_barber_page_callback(callback: CallbackQuery, service_id: str, i
 
     index = index % len(barbers)
     barber = barbers[index]
-    lines = [
-        "💈 <b>Barberni tanlang</b>\n",
-        f"\n👨‍🎤 <b>{_barber_full_name(barber)}</b>\n",
-    ]
-    if barber.experience:
-        lines.append(f"💼 <b>Tajriba:</b> {barber.experience}\n")
-    if barber.work_days:
-        lines.append(f"📅 <b>Ish kunlari:</b> {barber.work_days}\n")
-    if barber.work_time:
-        lines.append(f"⏰ <b>Ish vaqti:</b> {barber.work_time}\n")
-    if barber.breakdown:
-        lines.append(f"⏸️ <b>Tanaffus:</b> {barber.breakdown}\n")
-    if barber.phone:
-        lines.append(f"📞 <b>Aloqa:</b> <code>{barber.phone}</code>\n")
-    lines.append(f"\n📌 <i>({index + 1} / {len(barbers)})</i>")
-
-    caption = with_cancel_hint("".join(lines))
-    photo = await _fetch_latest_barber_photo(barber.id)
+    caption, photo = await get_barber_card_content(
+        barber,
+        title="💈 <b>Barberni tanlang</b>",
+        position=(index + 1, len(barbers)),
+    )
     await _render_catalog_callback(
         callback,
-        caption,
+        with_cancel_hint(caption),
         _barber_nav_keyboard(index, len(barbers), service_id, str(barber.id)),
         photo,
     )
@@ -593,27 +564,14 @@ async def _show_barber_page_message(message: Message, service_id: str, index: in
 
     index = index % len(barbers)
     barber = barbers[index]
-    lines = [
-        "💈 <b>Barberni tanlang</b>\n",
-        f"\n👨‍🎤 <b>{_barber_full_name(barber)}</b>\n",
-    ]
-    if barber.experience:
-        lines.append(f"💼 <b>Tajriba:</b> {barber.experience}\n")
-    if barber.work_days:
-        lines.append(f"📅 <b>Ish kunlari:</b> {barber.work_days}\n")
-    if barber.work_time:
-        lines.append(f"⏰ <b>Ish vaqti:</b> {barber.work_time}\n")
-    if barber.breakdown:
-        lines.append(f"⏸️ <b>Tanaffus:</b> {barber.breakdown}\n")
-    if barber.phone:
-        lines.append(f"📞 <b>Aloqa:</b> <code>{barber.phone}</code>\n")
-    lines.append(f"\n📌 <i>({index + 1} / {len(barbers)})</i>")
-
-    caption = with_cancel_hint("".join(lines))
-    photo = await _fetch_latest_barber_photo(barber.id)
+    caption, photo = await get_barber_card_content(
+        barber,
+        title="💈 <b>Barberni tanlang</b>",
+        position=(index + 1, len(barbers)),
+    )
     await _send_catalog_message(
         message,
-        caption,
+        with_cancel_hint(caption),
         _barber_nav_keyboard(index, len(barbers), service_id, str(barber.id)),
         photo,
     )

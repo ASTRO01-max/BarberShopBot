@@ -5,6 +5,7 @@ Barber panel tizimi - barcha modullarni birlashtirish
 from aiogram import Router
 
 from .superadmin import router as main_router
+from .barber_profile import router as profile_router
 from .own_statistics import router as stats_router
 from .modify_work_schedule import router as schedule_router
 from .pause_today import router as pause_router
@@ -18,6 +19,7 @@ router = Router()
 
 # Barcha sub-routerlarni qo'shish
 router.include_router(main_router)
+router.include_router(profile_router)
 router.include_router(stats_router)
 router.include_router(schedule_router)
 router.include_router(pause_router)
