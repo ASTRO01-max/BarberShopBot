@@ -1,11 +1,14 @@
 #bot.py
 import asyncio
+from contextlib import suppress
 from aiogram import Bot, Dispatcher, F
+from aiogram.filters import StateFilter
 from config import BOT_TOKEN
 from utils.logger import setup_logger
 from admins import router as admins_router
 from superadmins import router as barber_router
 from sql.db import init_db
+from sql.db_services import service_discount_expiry_worker
 #kere bopqoldi
 # from utils.get_file_id import router as fileid_router
 from handlers import (
@@ -88,11 +91,13 @@ dp.callback_query.register(
 
 dp.callback_query.register(
     booking.booking_for_me_callback,
+    booking.UserState.waiting_for_booking_target,
     lambda c: c.data == "booking_for_me"
 )
 
 dp.callback_query.register(
     booking.booking_for_other_callback,
+    booking.UserState.waiting_for_booking_target,
     lambda c: c.data == "booking_for_other"
 )
 
@@ -158,6 +163,13 @@ dp.callback_query.register(
 # FSM - Sana tanlash (orqaga)
 dp.callback_query.register(
     booking.back_to_date,
+    booking.UserState.waiting_for_date,
+    F.data.startswith("back_date_")
+)
+
+dp.callback_query.register(
+    booking.back_to_date,
+    booking.UserState.waiting_for_time,
     F.data.startswith("back_date_")
 )
 
@@ -176,6 +188,7 @@ dp.callback_query.register(
 
 # FSM - Booking bekor qilish (/cancel)
 BOOKING_CANCEL_STATES = (
+    booking.UserState.waiting_for_booking_target,
     booking.UserState.waiting_for_fullname,
     booking.UserState.waiting_for_phonenumber,
     booking.UserState.waiting_for_service,
@@ -190,6 +203,12 @@ for booking_state in BOOKING_CANCEL_STATES:
         booking_state,
         F.text.startswith("/cancel"),
     )
+
+dp.message.register(
+    booking.cancel_booking_universal,
+    StateFilter(None),
+    F.text.startswith("/cancel"),
+)
 
 # FSM - To‘liq ism qadam
 dp.message.register(
@@ -213,7 +232,13 @@ async def main():
     setup_logger()
     await init_db()
     print("Bot ishga tushdi...")
-    await dp.start_polling(bot)
+    discount_expiry_task = asyncio.create_task(service_discount_expiry_worker())
+    try:
+        await dp.start_polling(bot)
+    finally:
+        discount_expiry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await discount_expiry_task
 
 if __name__ == "__main__":
     asyncio.run(main())

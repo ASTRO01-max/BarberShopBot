@@ -1,8 +1,10 @@
-# admins/admin_buttons.py
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton 
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
-# Admin bo'lim tumalari
 ADMIN_MENU_TEXT = "👨‍💻 Admin"
 ADMIN_ADD_TEXT = "➕ Admin qo'shish"
 ADMIN_DEL_TEXT = "➖ Admin o'chirish"
@@ -30,6 +32,13 @@ INFO_DELETE_TEXT = "❌ Info o'chirish"
 INFO_ADD_CB = "info:add"
 INFO_EDIT_CB = "info:edit"
 INFO_DELETE_CB = "info:delete"
+
+ADMIN_MAIN_MENU_TITLE = "<b>Admin bo'limlari</b>\n\nKerakli bo'limni tanlang."
+ADMIN_DISCOUNT_MENU_TEXT = "🏷  Chegirma qo'yish"
+ADMIN_SERVICE_PROFILE_MENU_TEXT = "💈 Xizmat Profili"
+ADMIN_DISCOUNT_MENU_CB = "admin_discount_menu"
+ADMIN_SERVICE_PROFILE_MENU_CB = "admin_service_profile_menu"
+ADMIN_MAIN_MENU_BACK_CB = "admin_main_menu_back"
 
 
 def get_admin_inline_actions_kb() -> InlineKeyboardMarkup:
@@ -76,19 +85,26 @@ def get_info_inline_actions_kb() -> InlineKeyboardMarkup:
     )
 
 
-def get_main_menu():
-    builder = InlineKeyboardBuilder()
-    buttons = [
-        ("🏷 chegirma qo'yish", "discount"),
-        ("💈 ", "services"),
-        ("💈 Barberlar", "barbers"),
-        ("ℹ️ Ma'lumot / Kontaktlar", "contact")
-
+def build_main_menu_rows() -> list[list[InlineKeyboardButton]]:
+    return [
+        [
+            InlineKeyboardButton(
+                text=ADMIN_DISCOUNT_MENU_TEXT,
+                callback_data=ADMIN_DISCOUNT_MENU_CB,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=ADMIN_SERVICE_PROFILE_MENU_TEXT,
+                callback_data=ADMIN_SERVICE_PROFILE_MENU_CB,
+            )
+        ],
     ]
-    for text, data in buttons:
-        builder.button(text=text, callback_data=data)
-    builder.adjust(1)
-    return builder.as_markup()
+
+
+def get_main_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=build_main_menu_rows())
+
 
 markup = ReplyKeyboardMarkup(
     keyboard=[
@@ -97,5 +113,5 @@ markup = ReplyKeyboardMarkup(
         [KeyboardButton(text=INFO_MENU_TEXT), KeyboardButton(text=ADMIN_MENU_TEXT)],
         [KeyboardButton(text="✉️ Mahsus xabar yuborish")],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
 )

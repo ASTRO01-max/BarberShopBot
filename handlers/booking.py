@@ -2,10 +2,10 @@
 import logging
 import re
 from datetime import date, datetime, time, timedelta
-
 from aiogram import F, Router, types
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -19,22 +19,28 @@ from keyboards.main_buttons import get_dynamic_main_keyboard, phone_request_keyb
 from keyboards.main_menu import get_main_menu
 from handlers.barber_cards import barber_full_name, get_barber_card_content
 from sql.db import async_session
+from sql.db_services import list_services_ordered
 from sql.db_barbers_expanded import get_barbers_by_service
 from sql.db_order_utils import save_order
 from sql.db_users_utils import get_user, save_user
 from sql.models import Barbers, Order, Services
 from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.emoji_map import SERVICE_EMOJIS
+from utils.service_pricing import build_service_price_lines
 from utils.states import UserState
 from utils.validators import parse_user_date
+
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
+BOOKING_CANCELLED_TEXT = "❌ Navbat olish jarayoni bekor qilindi.\n\n🏠 Asosiy menyuga qaytdingiz."
 BOOKING_FOR_ME_CB = "booking_for_me"
 BOOKING_FOR_OTHER_CB = "booking_for_other"
 NO_BARBER_FOR_SERVICE_TEXT = "Hozircha ushbu xizmat uchun barber mavjud emas"
+SELECTED_BARBER_UNAVAILABLE_TEXT = "❌ Tanlangan barber ushbu xizmatni bajarmaydi."
+LOCKED_BARBER_STATE_KEY = "selected_barber_locked"
 TIME_BUTTONS_PER_ROW = 2
 DEFAULT_EXISTING_ORDER_DURATION_MINUTES = 60
 ISO_DATE_FORMAT = "%Y-%m-%d"
@@ -52,6 +58,51 @@ TIME_TOKEN_PATTERN = re.compile(r"\d{1,2}:\d{2}")
 
 def with_cancel_hint(text: str) -> str:
     return f"{text}{CANCEL_HINT}"
+
+
+async def _ensure_callback_state(
+    callback: CallbackQuery,
+    state: FSMContext,
+    *allowed_states: State,
+) -> bool:
+    current_state = await state.get_state()
+    allowed_state_values = {allowed_state.state for allowed_state in allowed_states}
+    if current_state not in allowed_state_values:
+        await callback.answer()
+        return False
+    return True
+
+
+async def _finish_booking_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        BOOKING_CANCELLED_TEXT,
+        reply_markup=get_main_menu(),
+    )
+
+
+async def _show_locked_barber_unavailable_callback(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    await state.clear()
+    await _render_catalog_callback(
+        callback,
+        SELECTED_BARBER_UNAVAILABLE_TEXT,
+        booking_keyboards.back_button(),
+    )
+    await callback.answer()
+
+
+async def _show_locked_barber_unavailable_message(
+    message: Message,
+    state: FSMContext,
+):
+    await state.clear()
+    await message.answer(
+        SELECTED_BARBER_UNAVAILABLE_TEXT,
+        reply_markup=booking_keyboards.back_button(),
+    )
 
 
 def _parse_duration_minutes(raw_duration: str | int | float | None) -> int | None:
@@ -345,9 +396,7 @@ def _barber_nav_keyboard(index: int, total: int, service_id: str, barber_id: str
 
 
 async def _fetch_services():
-    async with async_session() as session:
-        result = await session.execute(select(Services).order_by(Services.id.asc()))
-        return result.scalars().all()
+    return await list_services_ordered()
 
 
 async def _fetch_active_barbers_by_service(service_id: str):
@@ -489,10 +538,11 @@ async def _show_service_page_callback(callback: CallbackQuery, index: int = 0) -
     index = index % len(services)
     service = services[index]
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
+    price_lines = "\n".join(build_service_price_lines(service))
     caption = with_cancel_hint(
         f"💈 <b>Xizmatni tanlang</b>\n\n"
         f"{emoji} <b>{service.name}</b>\n"
-        f"💵 <b>Narx:</b> {service.price} so'm\n"
+        f"{price_lines}\n"
         f"🕒 <b>Davomiyligi:</b> {service.duration}\n\n"
         f"📌 <i>({index + 1} / {len(services)})</i>"
     )
@@ -514,10 +564,11 @@ async def _show_service_page_message(message: Message, index: int = 0) -> bool:
     index = index % len(services)
     service = services[index]
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
+    price_lines = "\n".join(build_service_price_lines(service))
     caption = with_cancel_hint(
         f"💈 <b>Xizmatni tanlang</b>\n\n"
         f"{emoji} <b>{service.name}</b>\n"
-        f"💵 <b>Narx:</b> {service.price} so'm\n"
+        f"{price_lines}\n"
         f"🕒 <b>Davomiyligi:</b> {service.duration}\n\n"
         f"📌 <i>({index + 1} / {len(services)})</i>"
     )
@@ -637,20 +688,32 @@ async def _go_to_date_from_message(
 async def _handle_service_selected(callback: CallbackQuery, state: FSMContext, service_id: str):
     await state.update_data(service_id=service_id)
     data = await state.get_data()
-    barber_id = data.get("barber_id")
+    barber_id = str(data["barber_id"]) if data.get("barber_id") is not None else None
+    locked_barber = bool(data.get(LOCKED_BARBER_STATE_KEY))
 
     if barber_id:
-        if await _is_barber_available_for_service(service_id, str(barber_id)):
+        if await _is_barber_available_for_service(service_id, barber_id):
             await _go_to_date_from_callback(
                 callback,
                 state,
                 service_id,
-                str(barber_id),
+                barber_id,
                 "Xizmat tanlandi ✅",
             )
             return
 
+        if locked_barber:
+            await _show_locked_barber_unavailable_callback(callback, state)
+            return
+
         await state.update_data(barber_id=None)
+        shown = await _show_barber_page_callback(callback, service_id, index=0)
+        await state.set_state(UserState.waiting_for_barber)
+        if shown:
+            await callback.answer(SELECTED_BARBER_UNAVAILABLE_TEXT, show_alert=True)
+        else:
+            await callback.answer(NO_BARBER_FOR_SERVICE_TEXT, show_alert=True)
+        return
 
     shown = await _show_barber_page_callback(callback, service_id, index=0)
     await state.set_state(UserState.waiting_for_barber)
@@ -672,6 +735,7 @@ async def _handle_barber_selected(
         return
 
     if not await _is_barber_available_for_service(resolved_service_id, barber_id):
+        await state.update_data(barber_id=None)
         shown = await _show_barber_page_callback(callback, resolved_service_id, index=0)
         await state.set_state(UserState.waiting_for_barber)
         if shown:
@@ -691,6 +755,7 @@ async def _handle_barber_selected(
 
 @router.message(
     StateFilter(
+        UserState.waiting_for_booking_target,
         UserState.waiting_for_fullname,
         UserState.waiting_for_phonenumber,
         UserState.waiting_for_service,
@@ -701,15 +766,16 @@ async def _handle_barber_selected(
     F.text.startswith("/cancel"),
 )
 async def cancel_booking(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "❌ Navbat olish jarayoni bekor qilindi.\n\n🏠 Asosiy menyuga qaytdingiz.",
-        reply_markup=get_main_menu(),
-    )
+    await _finish_booking_cancel(message, state)
+
+
+async def cancel_booking_universal(message: types.Message, state: FSMContext):
+    await _finish_booking_cancel(message, state)
 
 
 async def start_booking(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    await state.set_state(UserState.waiting_for_booking_target)
     text = with_cancel_hint("Kim uchun navbat olmoqchisiz?")
     markup = _booking_target_keyboard()
     if callback.message.photo:
@@ -741,11 +807,23 @@ async def _start_booking_for_me(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == BOOKING_FOR_ME_CB)
 async def booking_for_me_callback(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(
+        callback,
+        state,
+        UserState.waiting_for_booking_target,
+    ):
+        return
     await _start_booking_for_me(callback, state)
 
 
 @router.callback_query(F.data == BOOKING_FOR_OTHER_CB)
 async def booking_for_other_callback(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(
+        callback,
+        state,
+        UserState.waiting_for_booking_target,
+    ):
+        return
     await state.update_data(is_for_other=True)
     await _ask_fullname(callback)
     await state.set_state(UserState.waiting_for_fullname)
@@ -758,7 +836,11 @@ async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Noto'g'ri barber ma'lumoti", show_alert=True)
         return
 
-    barber_id = parts[2]
+    barber_id = parts[2].strip()
+    if not barber_id.isdigit():
+        await callback.answer("Noto'g'ri barber ma'lumoti", show_alert=True)
+        return
+
     data = await state.get_data()
     current_state = await state.get_state()
 
@@ -766,7 +848,12 @@ async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
         await _handle_barber_selected(callback, state, str(data["service_id"]), barber_id)
         return
 
-    await state.update_data(barber_id=barber_id)
+    await state.clear()
+    await state.update_data(
+        barber_id=barber_id,
+        is_for_other=False,
+        **{LOCKED_BARBER_STATE_KEY: True},
+    )
     has_profile = await _has_user_profile(callback.from_user.id, state)
     if not has_profile:
         await _ask_fullname(callback)
@@ -866,12 +953,23 @@ async def process_phonenumber(message: Message, state: FSMContext):
     data = await state.get_data()
     service_id = str(data["service_id"]) if data.get("service_id") is not None else None
     barber_id = str(data["barber_id"]) if data.get("barber_id") is not None else None
+    locked_barber = bool(data.get(LOCKED_BARBER_STATE_KEY))
 
     if service_id and barber_id:
         if await _is_barber_available_for_service(service_id, barber_id):
             await _go_to_date_from_message(message, state, service_id, barber_id)
             return
+
+        if locked_barber:
+            await _show_locked_barber_unavailable_message(message, state)
+            return
+
         await state.update_data(barber_id=None)
+        await message.answer(
+            with_cancel_hint(
+                f"{SELECTED_BARBER_UNAVAILABLE_TEXT}\n\nIltimos, boshqa barber tanlang."
+            )
+        )
 
     if service_id:
         await _show_barber_page_message(message, service_id, index=0)
@@ -883,6 +981,9 @@ async def process_phonenumber(message: Message, state: FSMContext):
 
 
 async def booking_service_nav(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_service):
+        return
+
     parts = callback.data.split("_")
     if len(parts) != 3:
         await callback.answer("Noto'g'ri so'rov", show_alert=True)
@@ -911,6 +1012,9 @@ async def booking_service_nav(callback: CallbackQuery, state: FSMContext):
 
 
 async def booking_service_pick(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_service):
+        return
+
     parts = callback.data.split("_", 2)
     if len(parts) < 3:
         await callback.answer("Noto'g'ri xizmat", show_alert=True)
@@ -925,6 +1029,9 @@ async def booking_service_pick(callback: CallbackQuery, state: FSMContext):
 
 
 async def booking_barber_nav(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_barber):
+        return
+
     parts = callback.data.split("_", 3)
     if len(parts) != 4:
         await callback.answer("Noto'g'ri so'rov", show_alert=True)
@@ -958,6 +1065,9 @@ async def booking_barber_nav(callback: CallbackQuery, state: FSMContext):
 
 
 async def booking_barber_pick(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_barber):
+        return
+
     parts = callback.data.split("_", 3)
     if len(parts) != 4:
         await callback.answer("Noto'g'ri barber", show_alert=True)
@@ -969,6 +1079,9 @@ async def booking_barber_pick(callback: CallbackQuery, state: FSMContext):
 
 
 async def book_step1(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_service):
+        return
+
     parts = callback.data.split("_", 1)
     if len(parts) < 2:
         await callback.answer("Noto'g'ri xizmat", show_alert=True)
@@ -983,6 +1096,9 @@ async def book_step1(callback: CallbackQuery, state: FSMContext):
 
 
 async def book_step2(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_barber):
+        return
+
     parts = callback.data.split("_", 2)
     if len(parts) != 3:
         await callback.answer("Noto'g'ri barber", show_alert=True)
@@ -998,6 +1114,9 @@ async def book_step2(callback: CallbackQuery, state: FSMContext):
 
 
 async def book_step3(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_date):
+        return
+
     _, service_id, barber_id, date = callback.data.split("_")
     await state.update_data(date=date)
 
@@ -1071,6 +1190,14 @@ async def book_step3_message(message: Message, state: FSMContext):
 
 
 async def back_to_date(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(
+        callback,
+        state,
+        UserState.waiting_for_date,
+        UserState.waiting_for_time,
+    ):
+        return
+
     _, _, service_id, barber_id = callback.data.split("_")
 
     if callback.message.photo:
@@ -1090,6 +1217,9 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("confirm_"))
 async def confirm(callback: types.CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_time):
+        return
+
     data = callback.data
     _, service_id, barber_id, date_str, time_str = data.split("_", 4)
     user_id = callback.from_user.id

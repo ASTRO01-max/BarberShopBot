@@ -16,6 +16,7 @@ from .admin_buttons import (
     ADMIN_DEL_CB,
     ADMIN_DEL_TEXT,
     ADMIN_MENU_TEXT,
+    build_main_menu_rows,
     get_admin_cancel_kb,
 )
 
@@ -73,6 +74,7 @@ def _admin_nav_keyboard(index: int) -> types.InlineKeyboardMarkup:
                     callback_data=f"{ADMIN_DELETE_PICK_PREFIX}:{index}",
                 ),
             ],
+            *build_main_menu_rows(),
         ]
     )
 

@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Numeric,
 )
 from sqlalchemy import LargeBinary
 from sqlalchemy.sql import func
@@ -85,7 +86,7 @@ class Barbers(Base):
     def __repr__(self):
         return f"<Barber {self.barber_first_name} {self.barber_last_name}>"
 
-
+#Barberlar rasimlari
 class BarberPhotos(Base):
     __tablename__ = "barber_photos"
 
@@ -103,6 +104,38 @@ class Services(Base):
     price = Column(Integer, nullable=False)
     duration = Column(String(50), nullable=False)
     photo = Column(String(300), nullable=True)
+
+
+
+#Xizmatlarga chegirmalar
+class ServiceDiscounts(Base):
+    __tablename__ = "service_discounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    service_id = Column(
+        BigInteger,
+        ForeignKey("services.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    discount_percent = Column(Numeric(5, 2), nullable=False)
+    discounted_price = Column(Integer, nullable=False)
+    applied_scope = Column(String(20), nullable=False, server_default="single")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    end_at = Column(Date, nullable=False)
+    end_time = Column(Time, nullable=False)
+
+
+#Xizmatlar Profili
+# class ServiceProfileSettings(Base):
+#     __tablename__ = "service_profile_settings"
+
 
 
 #Super Adminlar

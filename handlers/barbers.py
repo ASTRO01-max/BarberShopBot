@@ -2,7 +2,6 @@
 from aiogram import Router, types
 from sqlalchemy.future import select
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from handlers.barber_cards import get_barber_card_content
 from sql.db import async_session
 from sql.models import Barbers

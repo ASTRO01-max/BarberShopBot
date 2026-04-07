@@ -1,12 +1,10 @@
-# handlers/services.py
 from aiogram import Router, types
-from sqlalchemy.future import select
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from sql.db import async_session
-from sql.models import Services
 from keyboards.booking_keyboards import back_button
+from sql.db_services import list_services_ordered
 from utils.emoji_map import SERVICE_EMOJIS
+from utils.service_pricing import build_service_price_lines
 
 router = Router()
 
@@ -19,7 +17,10 @@ def service_nav_keyboard(index: int, total: int, service_id: int):
                 InlineKeyboardButton(text="➡️ Keyingi", callback_data=f"services_next_{index}"),
             ],
             [
-                InlineKeyboardButton(text="🗓️ Navbat boshlash", callback_data=f"book_service_{service_id}"),
+                InlineKeyboardButton(
+                    text="🗓️ Navbat boshlash",
+                    callback_data=f"book_service_{service_id}",
+                ),
             ],
             [
                 InlineKeyboardButton(text="🔙 Orqaga", callback_data="back"),
@@ -30,19 +31,17 @@ def service_nav_keyboard(index: int, total: int, service_id: int):
 
 async def send_service(callback: types.CallbackQuery, services, index: int):
     service = services[index]
-
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
+    price_lines = "\n".join(build_service_price_lines(service))
 
     caption = (
         f"{emoji} <b>{service.name}</b>\n"
-        f"💵 <b>Narx:</b> {service.price} so'm\n"
+        f"{price_lines}\n"
         f"🕒 <b>Davomiyligi:</b> {service.duration}\n"
         f"\n📌 <i>({index + 1} / {len(services)})</i>"
     )
 
     keyboard = service_nav_keyboard(index, len(services), service.id)
-
-    # Sizning modelda rasm Services.photo ichida saqlanadi (file_id)
     service_photo = getattr(service, "photo", None)
 
     if service_photo:
@@ -86,9 +85,7 @@ async def send_service(callback: types.CallbackQuery, services, index: int):
 
 
 async def show_services(callback: types.CallbackQuery):
-    async with async_session() as session:
-        result = await session.execute(select(Services).order_by(Services.id.asc()))
-        services = result.scalars().all()
+    services = await list_services_ordered()
 
     if not services:
         await callback.message.edit_text(
@@ -102,10 +99,7 @@ async def show_services(callback: types.CallbackQuery):
 
 async def navigate_services(callback: types.CallbackQuery):
     action, index = callback.data.split("_")[1], int(callback.data.split("_")[2])
-
-    async with async_session() as session:
-        result = await session.execute(select(Services).order_by(Services.id.asc()))
-        services = result.scalars().all()
+    services = await list_services_ordered()
 
     if not services:
         await callback.answer("⚠️ Xizmatlar topilmadi.", show_alert=True)

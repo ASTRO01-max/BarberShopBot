@@ -120,12 +120,10 @@ async def show_user_database_actions(message: Message, state: FSMContext):
     await state.clear()
     fullname = user.fullname or "Kiritilmagan"
     phone = user.phone or "Kiritilmagan"
-    user_db_id = user.id if user.id is not None else "Kiritilmagan"
     user_tg_id = user.tg_id if user.tg_id is not None else message.from_user.id
 
     await message.answer(
         "📄 Foydalanuvchi ma'lumotlari:\n\n"
-        f"🆔 ID: {user_db_id}\n"
         f"🆔 Telegram ID: {user_tg_id}\n"
         f"👤 To'liq ism: {fullname}\n"
         f"📞 Telefon: {phone}\n\n"
@@ -240,15 +238,4 @@ async def process_new_phone(message: types.Message, state: FSMContext):
     )
 
 
-# @router.message(F.text == "❌ Foydalanuvchi ma'lumotlarini o'chirish")
-# async def delete_user_data(message: types.Message):
-#     user_id = message.from_user.id
-#     deleted = await delete_user(user_id)
-#     keyboard = await get_dynamic_main_keyboard(user_id)
 
-#     if deleted:
-#         await message.answer("🗑 Foydalanuvchi ma'lumotlari muvaffaqiyatli o'chirildi!", reply_markup=keyboard)
-#     else:
-#         await message.answer("⚠️ Foydalanuvchi topilmadi yoki o'chirishda xatolik yuz berdi.", reply_markup=keyboard)
-
-#     await message.answer("Quyidagi menyudan birini tanlang:", reply_markup=get_main_menu())
