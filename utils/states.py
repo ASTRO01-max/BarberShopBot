@@ -36,6 +36,9 @@ class AdminDiscountStates(StatesGroup):
     selecting_discount_scope = State()
     waiting_for_all_services_percent = State()
     waiting_for_selected_service_percent = State()
+    waiting_for_discount_confirmation = State()
+    waiting_for_discount_end_date = State()
+    waiting_for_discount_end_time = State()
 
 
 class AdminServiceProfileStates(StatesGroup):
