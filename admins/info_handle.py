@@ -1,587 +1,689 @@
-# admins/info_hande.py
-from dataclasses import dataclass
-from datetime import datetime
 from html import escape
 
 from aiogram import F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from sql.db import async_session
-from sql.models import Admins, Info, InfoExpanded
-from .admin_buttons import INFO_ADD_CB, INFO_DELETE_CB, INFO_EDIT_CB, INFO_MENU_TEXT
+from sql.db_info import update_info_expanded_fields, update_info_fields
+from sql.db_info_profile import (
+    ALLOWED_INFO_HIDDEN_FIELDS,
+    get_info_hidden_fields,
+    set_info_field_visibility,
+)
+from utils.info_profile import (
+    build_info_text,
+    build_social_link_rows,
+    get_field_display_value,
+    get_info_profile_snapshot,
+    normalize_instagram,
+    normalize_telegram,
+    normalize_website,
+)
+from .admin_buttons import ADMIN_MAIN_MENU_BACK_CB
+from .service_admin_common import ensure_admin_callback, ensure_admin_message
 
 router = Router()
 
-# Pagination callback format:
-# info:nav:prev:{current_page}
-# info:nav:next:{current_page}
-INFO_NAV_PREFIX = "info:nav"
-INFO_NAV_NOOP_CB = f"{INFO_NAV_PREFIX}:noop"
-PAGE_TABLE_INFO = "info"
-PAGE_TABLE_EXPANDED = "info_expanded"
+INFO_PROFILE_MESSAGE_ID_KEY = "info_profile_message_id"
+INFO_PROFILE_FIELD_KEY = "info_profile_field"
+INFO_PREVIEW_CB = "admin_info_preview"
+INFO_HIDE_MENU_CB = "admin_info_hide_menu"
+INFO_EDIT_MENU_CB = "admin_info_edit_menu"
+INFO_MAP_EDIT_CB = "admin_info_map_edit"
+INFO_HIDE_FIELD_PREFIX = "admin_info_hide_field"
+INFO_EDIT_FIELD_PREFIX = "admin_info_edit_field"
 
-# FSM data keys
-STATE_PAGE_KEY = "info_page"
-STATE_TARGET_KEY = "info_target_id"
-STATE_STEP_KEY = "info_step"
-STATE_PHONE_KEY = "info_phone"
+CLEAR_COMMANDS = {"yo'q", "yoq", "-", "none", "null"}
 
-# FSM steps
-STEP_PHONE = "phone"
-STEP_DISCOUNT = "discount"
+EDITABLE_INFO_FIELDS = {
+    "telegram": {
+        "label": "Telegram",
+        "emoji": "✈️",
+        "table": "info",
+        "example": "@barbershop",
+        "max_length": 150,
+    },
+    "instagram": {
+        "label": "Instagram",
+        "emoji": "📷",
+        "table": "info",
+        "example": "@barbershop_uz",
+        "max_length": 150,
+    },
+    "website": {
+        "label": "Website",
+        "emoji": "🌐",
+        "table": "info",
+        "example": "barbershop.uz",
+        "max_length": 200,
+    },
+    "phone_number": {
+        "label": "Telefon 1",
+        "emoji": "📞",
+        "table": "info_expanded",
+        "example": "+998901234567",
+        "max_length": 30,
+    },
+    "phone_number2": {
+        "label": "Telefon 2",
+        "emoji": "📞",
+        "table": "info_expanded",
+        "example": "+998901234568",
+        "max_length": 30,
+    },
+    "region": {
+        "label": "Hudud",
+        "emoji": "🏙",
+        "table": "info",
+        "example": "Toshkent",
+        "max_length": 120,
+    },
+    "district": {
+        "label": "Tuman",
+        "emoji": "🏘",
+        "table": "info",
+        "example": "Chilonzor",
+        "max_length": 120,
+    },
+    "street": {
+        "label": "Ko'cha",
+        "emoji": "🛣",
+        "table": "info",
+        "example": "Bunyodkor ko'chasi, 12-uy",
+        "max_length": 200,
+    },
+    "address_text": {
+        "label": "Manzil",
+        "emoji": "📍",
+        "table": "info",
+        "example": "Toshkent, Chilonzor tumani, Bunyodkor ko'chasi 12-uy",
+        "max_length": 400,
+    },
+    "work_time_text": {
+        "label": "Ish vaqti",
+        "emoji": "🕒",
+        "table": "info",
+        "example": "09:00-21:00",
+        "max_length": 200,
+    },
+}
 
-CANCEL_HINT = "\n\nBekor qilish uchun: /cancel"
-
-
-class InfoFSM(StatesGroup):
-    adding = State()
-    editing = State()
-
-
-@dataclass(frozen=True, slots=True)
-class InfoFieldSpec:
-    table: str
-    field: str
-    label: str
-    formatter: str = "text"
-
-
-@dataclass(slots=True)
-class InfoPageBundle:
-    total: int
-    page: int
-    spec: InfoFieldSpec
-    value: str
-    target_id: int | None
-
-
-INFO_FIELD_SPECS = [
-    InfoFieldSpec(PAGE_TABLE_INFO, "telegram", "✈️ Telegram"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "instagram", "📷 Instagram"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "website", "🔗 Website"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "region", "🏙 Hudud"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "district", "🏘 Tuman"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "street", "🛣 Ko'cha"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "address_text", "📍 Manzil"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "latitude", "🧭 Latitude"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "longitude", "🧭 Longitude"),
-    InfoFieldSpec(PAGE_TABLE_INFO, "work_time_text", "🕒 Ish vaqti"),
-]
-
-EXPANDED_FIELD_SPECS = [
-    InfoFieldSpec(PAGE_TABLE_EXPANDED, "phone_number", "📞 Telefon"),
-    InfoFieldSpec(PAGE_TABLE_EXPANDED, "discount", "💸 Chegirma"),
-    InfoFieldSpec(PAGE_TABLE_EXPANDED, "created_at", "📅 Yaratilgan", "datetime"),
-    InfoFieldSpec(PAGE_TABLE_EXPANDED, "updated_at", "♻️ Yangilangan", "datetime"),
-]
-
-PAGE_SPECS = INFO_FIELD_SPECS + EXPANDED_FIELD_SPECS
-PAGE_INDEX_BY_KEY = {(spec.table, spec.field): index for index, spec in enumerate(PAGE_SPECS)}
-TOTAL_PAGES = len(PAGE_SPECS)
-DEFAULT_PAGE = 0
-DEFAULT_EXPANDED_PAGE = PAGE_INDEX_BY_KEY[(PAGE_TABLE_EXPANDED, "phone_number")]
-
-
-def _to_int(value, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _safe_text(value) -> str:
-    if value is None:
-        return "—"
-    text = str(value).strip()
-    return text if text else "—"
-
-
-def _fmt_dt(value: datetime | None) -> str:
-    if not value:
-        return "—"
-    return value.strftime("%d.%m.%Y %H:%M")
-
-
-def _normalize_page(page: int) -> int:
-    return page % TOTAL_PAGES if TOTAL_PAGES else 0
+HIDEABLE_INFO_FIELDS = {
+    key: value for key, value in EDITABLE_INFO_FIELDS.items() if key in ALLOWED_INFO_HIDDEN_FIELDS
+}
 
 
-def _normalize_expanded_page(page: int) -> int:
-    normalized = _normalize_page(page)
-    spec = PAGE_SPECS[normalized]
-    return normalized if spec.table == PAGE_TABLE_EXPANDED else DEFAULT_EXPANDED_PAGE
+class InfoAdminState(StatesGroup):
+    waiting_for_field_value = State()
+    waiting_for_location = State()
 
 
-def _parse_nav_callback(data: str) -> tuple[str | None, int]:
-    parts = (data or "").split(":")
-    if len(parts) != 4:
-        return None, 0
-    if parts[0] != "info" or parts[1] != "nav":
-        return None, 0
-    action = parts[2]
-    if action not in {"prev", "next"}:
-        return None, 0
-    return action, _to_int(parts[3], 0)
+def _normalize_phone(raw_phone: str) -> str | None:
+    digits = "".join(ch for ch in raw_phone if ch.isdigit())
+    if digits.startswith("998") and len(digits) == 12:
+        return f"+{digits}"
+    if len(digits) == 9:
+        return f"+998{digits}"
+    return None
 
 
-def _parse_target_callback(data: str, prefix: str) -> tuple[int | None, int | None]:
-    # Supports callback format: {prefix}:{page}:{target_id}
-    marker = f"{prefix}:"
-    if not (data or "").startswith(marker):
-        return None, None
-
-    payload = data[len(marker) :]
-    parts = payload.split(":")
-    if len(parts) != 2:
-        return None, None
-
-    page = _to_int(parts[0], 0)
-    target_id = _to_int(parts[1], 0)
-    if target_id <= 0:
-        return None, None
-    return page, target_id
+def _with_cancel_hint(text: str) -> str:
+    return f"{text}\n\nBekor qilish: /cancel"
 
 
-def _format_field_value(spec: InfoFieldSpec, obj: Info | InfoExpanded | None) -> str:
-    raw_value = getattr(obj, spec.field, None) if obj else None
-    if spec.formatter == "datetime":
-        return _fmt_dt(raw_value)
-    return _safe_text(raw_value)
-
-
-def _render_value_html(value: str) -> str:
-    safe_value = escape(value).replace("\n", "<br>")
-    return f"<blockquote>{safe_value}</blockquote>"
-
-
-def _render_text(bundle: InfoPageBundle) -> str:
-    return (
-        f"<b>{escape(bundle.spec.label)}</b>\n\n"
-        f"{_render_value_html(bundle.value)}\n"
-        f"<code>{bundle.page + 1}/{bundle.total}</code>"
+def _build_admin_preview_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🙈 Ma'lumotlarni yashirish", callback_data=INFO_HIDE_MENU_CB)],
+            [InlineKeyboardButton(text="✏️ Ma'lumotlarni o'zgartirish", callback_data=INFO_EDIT_MENU_CB)],
+            [InlineKeyboardButton(text="🗺 Xaritani o'zgartirish", callback_data=INFO_MAP_EDIT_CB)],
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data=ADMIN_MAIN_MENU_BACK_CB)],
+        ]
     )
 
 
-def _build_keyboard(
-    total: int,
-    page: int,
-    spec: InfoFieldSpec,
-    target_id: int | None,
-) -> types.InlineKeyboardMarkup:
-    nav_row = [
-        types.InlineKeyboardButton(
-            text="⬅️ Oldingi",
-            callback_data=f"{INFO_NAV_PREFIX}:prev:{page}",
-        ),
-        types.InlineKeyboardButton(
-            text=f"📄 {page + 1}/{total}" if total > 0 else "📄 0/0",
-            callback_data=INFO_NAV_NOOP_CB,
-        ),
-        types.InlineKeyboardButton(
-            text="➡️ Keyingi",
-            callback_data=f"{INFO_NAV_PREFIX}:next:{page}",
-        ),
+def _build_info_preview_markup(include_links: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
+    rows = list(include_links)
+    rows.extend(_build_admin_preview_keyboard().inline_keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_hide_menu_keyboard(hidden_fields: set[str]) -> InlineKeyboardMarkup:
+    def label(field_key: str) -> str:
+        config = HIDEABLE_INFO_FIELDS[field_key]
+        if field_key in hidden_fields:
+            return f"🙈 {config['label']}"
+        return f"{config['emoji']} {config['label']}"
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=label("telegram"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'telegram'}",
+            ),
+            InlineKeyboardButton(
+                text=label("instagram"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'instagram'}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=label("website"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'website'}",
+            ),
+            InlineKeyboardButton(
+                text=label("phone_number"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'phone_number'}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=label("phone_number2"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'phone_number2'}",
+            ),
+            InlineKeyboardButton(
+                text=label("work_time_text"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'work_time_text'}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=label("region"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'region'}",
+            ),
+            InlineKeyboardButton(
+                text=label("district"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'district'}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=label("street"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'street'}",
+            ),
+            InlineKeyboardButton(
+                text=label("address_text"),
+                callback_data=f"{INFO_HIDE_FIELD_PREFIX}:{'address_text'}",
+            ),
+        ],
+        [InlineKeyboardButton(text="🔙 Previewga qaytish", callback_data=INFO_PREVIEW_CB)],
     ]
-
-    rows = [nav_row]
-
-    if spec.table == PAGE_TABLE_EXPANDED and not target_id:
-        rows.append(
-            [types.InlineKeyboardButton(text="➕ ℹ️ Info kiritish", callback_data=INFO_ADD_CB)]
-        )
-    elif spec.table == PAGE_TABLE_EXPANDED and target_id:
-        rows.append(
-            [
-                types.InlineKeyboardButton(
-                    text="✏️ Info tahrirlash",
-                    callback_data=f"{INFO_EDIT_CB}:{page}:{target_id}",
-                ),
-                types.InlineKeyboardButton(
-                    text="❌ Info o'chirish",
-                    callback_data=f"{INFO_DELETE_CB}:{page}:{target_id}",
-                ),
-            ]
-        )
-
-    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _is_admin(tg_id: int) -> bool:
-    async with async_session() as session:
-        admin_id = await session.scalar(select(Admins.id).where(Admins.tg_id == tg_id).limit(1))
-    return admin_id is not None
+def _build_edit_menu_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="✈️ Telegram",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:telegram",
+            ),
+            InlineKeyboardButton(
+                text="📷 Instagram",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:instagram",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🌐 Website",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:website",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="📞 Telefon 1",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:phone_number",
+            ),
+            InlineKeyboardButton(
+                text="📞 Telefon 2",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:phone_number2",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🏙 Hudud",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:region",
+            ),
+            InlineKeyboardButton(
+                text="🏘 Tuman",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:district",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🛣 Ko'cha",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:street",
+            ),
+            InlineKeyboardButton(
+                text="📍 Manzil",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:address_text",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🕒 Ish vaqti",
+                callback_data=f"{INFO_EDIT_FIELD_PREFIX}:work_time_text",
+            ),
+        ],
+        [InlineKeyboardButton(text="🔙 Previewga qaytish", callback_data=INFO_PREVIEW_CB)],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _fetch_page_bundle(page: int) -> InfoPageBundle:
-    async with async_session() as session:
-        base_info = await session.get(Info, 1)
-        result = await session.execute(
-            select(InfoExpanded).order_by(InfoExpanded.id.asc()).limit(1)
-        )
-        expanded_item = result.scalars().first()
-
-    normalized = _normalize_page(page)
-    spec = PAGE_SPECS[normalized]
-    source_obj = base_info if spec.table == PAGE_TABLE_INFO else expanded_item
-    return InfoPageBundle(
-        total=TOTAL_PAGES,
-        page=normalized,
-        spec=spec,
-        value=_format_field_value(spec, source_obj),
-        target_id=getattr(expanded_item, "id", None),
-    )
-
-
-async def _fetch_by_id(target_id: int) -> InfoExpanded | None:
-    async with async_session() as session:
-        return await session.get(InfoExpanded, target_id)
-
-
-async def _state_page(state: FSMContext, default: int = DEFAULT_PAGE) -> int:
-    data = await state.get_data()
-    return _to_int(data.get(STATE_PAGE_KEY), default)
-
-
-async def _safe_edit_or_answer(
-    message: types.Message | None,
+async def _edit_or_send_text(
+    *,
+    bot,
+    chat_id: int,
+    message_id: int | None,
     text: str,
-    reply_markup: types.InlineKeyboardMarkup,
-) -> None:
-    if not message:
-        return
+    reply_markup: InlineKeyboardMarkup,
+) -> int:
+    if message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+                disable_web_page_preview=True,
+            )
+            return message_id
+        except Exception:
+            pass
 
-    try:
-        await message.edit_text(
-            text,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-    except Exception:
-        await message.answer(
-            text,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-
-
-async def _show_page_message(message: types.Message, state: FSMContext, page: int = DEFAULT_PAGE) -> None:
-    bundle = await _fetch_page_bundle(page)
-    await state.update_data(**{STATE_PAGE_KEY: bundle.page})
-    text = _render_text(bundle)
-    kb = _build_keyboard(bundle.total, bundle.page, bundle.spec, bundle.target_id)
-    await message.answer(
-        text,
-        reply_markup=kb,
+    sent = await bot.send_message(
+        chat_id=chat_id,
+        text=text,
         parse_mode="HTML",
+        reply_markup=reply_markup,
         disable_web_page_preview=True,
     )
+    return sent.message_id
 
 
-async def _show_page_callback(
-    callback: types.CallbackQuery,
-    state: FSMContext,
-    page: int = DEFAULT_PAGE,
-) -> None:
-    bundle = await _fetch_page_bundle(page)
-    await state.update_data(**{STATE_PAGE_KEY: bundle.page})
-    text = _render_text(bundle)
-    kb = _build_keyboard(bundle.total, bundle.page, bundle.spec, bundle.target_id)
-    await _safe_edit_or_answer(callback.message, text, kb)
+async def _show_info_preview(
+    *,
+    bot,
+    chat_id: int,
+    message_id: int | None,
+    notice: str | None = None,
+) -> int:
+    snapshot = await get_info_profile_snapshot()
+    text = build_info_text(snapshot)
+    if notice:
+        text = f"{notice}\n\n{text}"
+    markup = _build_info_preview_markup(
+        build_social_link_rows(snapshot, include_website=True)
+    )
+    return await _edit_or_send_text(
+        bot=bot,
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=markup,
+    )
 
 
-async def _clear_info_form_state(state: FSMContext, page: int | None = None) -> None:
-    current_state = await state.get_state()
-    if current_state in {InfoFSM.adding.state, InfoFSM.editing.state}:
-        await state.clear()
-        if page is not None:
-            await state.update_data(**{STATE_PAGE_KEY: page})
+async def _show_hide_menu(
+    *,
+    bot,
+    chat_id: int,
+    message_id: int | None,
+    notice: str | None = None,
+) -> int:
+    hidden_fields = set(await get_info_hidden_fields())
+    text = (
+        "<b>Ma'lumotlarni yashirish</b>\n\n"
+        "Tugmani bossangiz maydon yashiriladi, qayta bossangiz yana ko'rinadi."
+    )
+    if notice:
+        text = f"{notice}\n\n{text}"
+    return await _edit_or_send_text(
+        bot=bot,
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=_build_hide_menu_keyboard(hidden_fields),
+    )
+
+
+async def _show_edit_menu(
+    *,
+    bot,
+    chat_id: int,
+    message_id: int | None,
+    notice: str | None = None,
+) -> int:
+    text = "<b>Ma'lumotlarni o'zgartirish</b>\n\nQaysi maydonni tahrirlash kerakligini tanlang."
+    if notice:
+        text = f"{notice}\n\n{text}"
+    return await _edit_or_send_text(
+        bot=bot,
+        chat_id=chat_id,
+        message_id=message_id,
+        text=text,
+        reply_markup=_build_edit_menu_keyboard(),
+    )
+
+
+async def _show_map_prompt(
+    *,
+    bot,
+    chat_id: int,
+    message_id: int | None,
+) -> int:
+    return await _edit_or_send_text(
+        bot=bot,
+        chat_id=chat_id,
+        message_id=message_id,
+        text=(
+            "<b>Xaritani o'zgartirish</b>\n\n"
+            "Telegram orqali lokatsiya yoki venue yuboring. Lokatsiya kelgach latitude va longitude yangilanadi."
+        ),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Previewga qaytish", callback_data=INFO_PREVIEW_CB)]
+            ]
+        ),
+    )
+
+
+def _build_field_prompt(field_key: str, current_value: str) -> str:
+    config = EDITABLE_INFO_FIELDS[field_key]
+    lines = [
+        f"{config['emoji']} <b>{escape(config['label'])}</b>",
+        "",
+        f"Joriy qiymat: <b>{escape(current_value)}</b>",
+        "",
+        "Yangi qiymatni yuboring.",
+    ]
+
+    example = config.get("example")
+    if example:
+        lines.append(f"Namuna: <code>{escape(example)}</code>")
+
+    lines.append('"yo\'q" deb yuborsangiz qiymat o\'chiriladi.')
+    return _with_cancel_hint("\n".join(lines))
+
+
+def _normalize_field_value(field_key: str, raw_text: str) -> tuple[object, str | None]:
+    normalized_token = raw_text.strip().lower()
+    config = EDITABLE_INFO_FIELDS[field_key]
+
+    if normalized_token in CLEAR_COMMANDS:
+        return None, None
+
+    max_length = int(config["max_length"])
+    if len(raw_text) > max_length:
+        return None, f"{config['label']} {max_length} belgidan oshmasligi kerak."
+
+    if field_key == "telegram":
+        if normalize_telegram(raw_text) is None:
+            return None, "Telegram username yoki link noto'g'ri."
+        return raw_text, None
+
+    if field_key == "instagram":
+        if normalize_instagram(raw_text) is None:
+            return None, "Instagram username yoki link noto'g'ri."
+        return raw_text, None
+
+    if field_key == "website":
+        if normalize_website(raw_text) is None:
+            return None, "Website manzili noto'g'ri."
+        return raw_text, None
+
+    if field_key in {"phone_number", "phone_number2"}:
+        phone = _normalize_phone(raw_text)
+        if phone is None:
+            return None, "Telefon formati noto'g'ri. Masalan: +998901234567"
+        return phone, None
+
+    return raw_text, None
 
 
 async def open_info_panel(message: types.Message, state: FSMContext) -> None:
-    if not await _is_admin(message.from_user.id):
-        await message.answer("⛔ Bu bo'lim faqat adminlar uchun.")
+    if not await ensure_admin_message(message):
         return
 
     await state.clear()
-    await _show_page_message(message, state, page=DEFAULT_PAGE)
-
-
-@router.message(F.text == INFO_MENU_TEXT)
-async def open_info_menu_message(message: types.Message, state: FSMContext):
-    await open_info_panel(message, state)
-
-
-@router.callback_query(F.data == INFO_NAV_NOOP_CB)
-async def info_nav_noop(callback: types.CallbackQuery):
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith(f"{INFO_NAV_PREFIX}:"))
-async def info_navigate(callback: types.CallbackQuery, state: FSMContext):
-    if not await _is_admin(callback.from_user.id):
-        await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
-        return
-
-    action, current_page = _parse_nav_callback(callback.data or "")
-    if action is None:
-        await callback.answer("Noto'g'ri so'rov", show_alert=True)
-        return
-
-    bundle = await _fetch_page_bundle(current_page)
-    if action == "next":
-        target_page = (bundle.page + 1) % bundle.total
-    else:
-        target_page = (bundle.page - 1) % bundle.total
-
-    old_page = await _state_page(state, default=DEFAULT_PAGE)
-    if old_page != target_page:
-        await _clear_info_form_state(state, page=target_page)
-
-    await _show_page_callback(callback, state, page=target_page)
-    await callback.answer()
-
-
-@router.callback_query(F.data == INFO_ADD_CB)
-async def info_add_start(callback: types.CallbackQuery, state: FSMContext):
-    if not await _is_admin(callback.from_user.id):
-        await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
-        return
-
-    current_page = _normalize_expanded_page(
-        await _state_page(state, default=DEFAULT_EXPANDED_PAGE)
+    shown_message_id = await _show_info_preview(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        message_id=None,
     )
-    bundle = await _fetch_page_bundle(current_page)
-    if bundle.target_id:
-        await callback.answer("Info mavjud. Tahrirlashdan foydalaning.", show_alert=True)
-        await _show_page_callback(callback, state, page=current_page)
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+
+
+@router.callback_query(F.data == INFO_PREVIEW_CB)
+async def back_to_info_preview(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_admin_callback(callback):
         return
 
-    await state.set_state(InfoFSM.adding)
-    await state.update_data(
-        **{
-            STATE_PAGE_KEY: current_page,
-            STATE_TARGET_KEY: None,
-            STATE_STEP_KEY: STEP_PHONE,
-            STATE_PHONE_KEY: "",
-        }
-    )
-
-    if callback.message:
-        await callback.message.answer("📞 Telefon raqamini kiriting." + CANCEL_HINT)
-    await callback.answer()
-
-
-@router.callback_query(F.data == INFO_EDIT_CB)
-@router.callback_query(F.data.startswith(f"{INFO_EDIT_CB}:"))
-async def info_edit_start(callback: types.CallbackQuery, state: FSMContext):
-    if not await _is_admin(callback.from_user.id):
-        await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
-        return
-
-    parsed_page, parsed_target_id = _parse_target_callback(callback.data or "", INFO_EDIT_CB)
-    current_page = _normalize_expanded_page(
-        parsed_page if parsed_page is not None else await _state_page(state, default=DEFAULT_EXPANDED_PAGE)
-    )
-
-    if parsed_target_id:
-        current = await _fetch_by_id(parsed_target_id)
-        if not current:
-            await _clear_info_form_state(state, page=current_page)
-            await _show_page_callback(callback, state, page=current_page)
-            await callback.answer("Tanlangan info topilmadi.", show_alert=True)
-            return
-        target_id = current.id
-    else:
-        bundle = await _fetch_page_bundle(current_page)
-        if not bundle.target_id:
-            await _clear_info_form_state(state, page=current_page)
-            await _show_page_callback(callback, state, page=current_page)
-            await callback.answer("Tahrirlash uchun ma'lumot yo'q.", show_alert=True)
-            return
-        current = await _fetch_by_id(bundle.target_id)
-        if not current:
-            await _clear_info_form_state(state, page=current_page)
-            await _show_page_callback(callback, state, page=current_page)
-            await callback.answer("Tanlangan info topilmadi.", show_alert=True)
-            return
-        target_id = current.id
-
-    await _clear_info_form_state(state, page=current_page)
-
-    await state.set_state(InfoFSM.editing)
-    await state.update_data(
-        **{
-            STATE_PAGE_KEY: current_page,
-            STATE_TARGET_KEY: target_id,
-            STATE_STEP_KEY: STEP_PHONE,
-            STATE_PHONE_KEY: "",
-        }
-    )
-
-    if callback.message:
-        await callback.message.answer(
-            f"✏️ Telefon raqamini kiriting.\nJoriy: {_safe_text(current.phone_number)}{CANCEL_HINT}"
-        )
-    await callback.answer()
-
-
-@router.callback_query(F.data == INFO_DELETE_CB)
-@router.callback_query(F.data.startswith(f"{INFO_DELETE_CB}:"))
-async def info_delete(callback: types.CallbackQuery, state: FSMContext):
-    if not await _is_admin(callback.from_user.id):
-        await callback.answer("⛔ Ruxsat yo'q", show_alert=True)
-        return
-
-    parsed_page, target_id = _parse_target_callback(callback.data or "", INFO_DELETE_CB)
-    current_page = _normalize_expanded_page(
-        parsed_page if parsed_page is not None else await _state_page(state, default=DEFAULT_EXPANDED_PAGE)
-    )
-
-    if not target_id:
-        bundle = await _fetch_page_bundle(current_page)
-        if not bundle.target_id:
-            await _clear_info_form_state(state, page=current_page)
-            await _show_page_callback(callback, state, page=current_page)
-            await callback.answer("O'chirish uchun ma'lumot yo'q.", show_alert=True)
-            return
-        target_id = bundle.target_id
-
-    async with async_session() as session:
-        try:
-            obj = await session.get(InfoExpanded, target_id)
-            if not obj:
-                await callback.answer("Tanlangan info topilmadi.", show_alert=True)
-                await _clear_info_form_state(state, page=current_page)
-                await _show_page_callback(callback, state, page=current_page)
-                return
-
-            await session.delete(obj)
-            await session.commit()
-        except SQLAlchemyError:
-            await session.rollback()
-            await callback.answer("O'chirishda xatolik yuz berdi.", show_alert=True)
-            return
-
-    await _clear_info_form_state(state, page=current_page)
-    await _show_page_callback(callback, state, page=current_page)
-    await callback.answer("✅ Info o'chirildi.")
-
-
-@router.message(StateFilter(InfoFSM.adding, InfoFSM.editing), Command("cancel"))
-async def cancel_info_form(message: types.Message, state: FSMContext):
-    if not await _is_admin(message.from_user.id):
-        await state.clear()
-        await message.answer("⛔ Bu bo'lim faqat adminlar uchun.")
-        return
-
-    page = await _state_page(state, default=DEFAULT_PAGE)
     await state.clear()
-    await message.answer("❌ Jarayon bekor qilindi.")
-    await _show_page_message(message, state, page=page)
+    shown_message_id = await _show_info_preview(
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await callback.answer()
 
 
-@router.message(StateFilter(InfoFSM.adding, InfoFSM.editing))
-async def process_info_form(message: types.Message, state: FSMContext):
-    if not await _is_admin(message.from_user.id):
+@router.callback_query(F.data == INFO_HIDE_MENU_CB)
+async def open_hide_info_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_admin_callback(callback):
+        return
+
+    await state.clear()
+    shown_message_id = await _show_hide_menu(
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(f"{INFO_HIDE_FIELD_PREFIX}:"))
+async def toggle_info_field_visibility(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_admin_callback(callback):
+        return
+
+    field_key = (callback.data or "").split(":", 1)[1]
+    if field_key not in HIDEABLE_INFO_FIELDS:
+        await callback.answer("Maydon topilmadi.", show_alert=True)
+        return
+
+    current_hidden = set(await get_info_hidden_fields())
+    target_hidden = field_key not in current_hidden
+    await set_info_field_visibility(field_key, target_hidden)
+
+    shown_message_id = await _show_hide_menu(
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        notice=(
+            f"<b>{escape(HIDEABLE_INFO_FIELDS[field_key]['label'])} yashirildi.</b>"
+            if target_hidden
+            else f"<b>{escape(HIDEABLE_INFO_FIELDS[field_key]['label'])} yana ko'rsatildi.</b>"
+        ),
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await callback.answer()
+
+
+@router.callback_query(F.data == INFO_EDIT_MENU_CB)
+async def open_edit_info_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_admin_callback(callback):
+        return
+
+    await state.clear()
+    shown_message_id = await _show_edit_menu(
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(f"{INFO_EDIT_FIELD_PREFIX}:"))
+async def ask_info_field_value(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_admin_callback(callback):
+        return
+
+    field_key = (callback.data or "").split(":", 1)[1]
+    if field_key not in EDITABLE_INFO_FIELDS:
+        await callback.answer("Maydon topilmadi.", show_alert=True)
+        return
+
+    snapshot = await get_info_profile_snapshot()
+    await state.clear()
+    await state.set_state(InfoAdminState.waiting_for_field_value)
+    await state.update_data(
+        **{
+            INFO_PROFILE_MESSAGE_ID_KEY: callback.message.message_id,
+            INFO_PROFILE_FIELD_KEY: field_key,
+        }
+    )
+    await callback.message.answer(
+        _build_field_prompt(field_key, get_field_display_value(snapshot, field_key)),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == INFO_MAP_EDIT_CB)
+async def ask_info_location(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await ensure_admin_callback(callback):
+        return
+
+    await state.clear()
+    await state.set_state(InfoAdminState.waiting_for_location)
+    shown_message_id = await _show_map_prompt(
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await callback.message.answer(
+        _with_cancel_hint("📍 Yangi lokatsiyani Telegram location yoki venue ko'rinishida yuboring."),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(
+    Command("cancel"),
+    StateFilter(
+        InfoAdminState.waiting_for_field_value,
+        InfoAdminState.waiting_for_location,
+    ),
+)
+async def cancel_info_edit(message: types.Message, state: FSMContext) -> None:
+    if not await ensure_admin_message(message):
         await state.clear()
-        await message.answer("⛔ Bu bo'lim faqat adminlar uchun.")
         return
 
-    text = (message.text or "").strip()
-    if not text:
-        await message.answer("⚠️ Matn yuboring." + CANCEL_HINT)
-        return
-
-    current_state = await state.get_state()
     data = await state.get_data()
+    preview_message_id = data.get(INFO_PROFILE_MESSAGE_ID_KEY)
+    await state.clear()
+    shown_message_id = await _show_info_preview(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        message_id=preview_message_id,
+        notice="<b>Amal bekor qilindi.</b>",
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await message.answer("Amal bekor qilindi.")
 
-    page = _normalize_expanded_page(_to_int(data.get(STATE_PAGE_KEY), DEFAULT_EXPANDED_PAGE))
-    target_id = _to_int(data.get(STATE_TARGET_KEY), 0)
-    step = data.get(STATE_STEP_KEY)
 
-    if step not in {STEP_PHONE, STEP_DISCOUNT}:
+@router.message(InfoAdminState.waiting_for_field_value)
+async def save_info_field(message: types.Message, state: FSMContext) -> None:
+    if not await ensure_admin_message(message):
         await state.clear()
-        await message.answer("⚠️ Jarayon qayta tiklandi.")
-        await _show_page_message(message, state, page=page)
         return
 
-    if step == STEP_PHONE:
-        if len(text) > 30:
-            await message.answer("⚠️ Telefon raqami 30 belgidan oshmasligi kerak." + CANCEL_HINT)
-            return
-
-        await state.update_data(**{STATE_PHONE_KEY: text, STATE_STEP_KEY: STEP_DISCOUNT})
-        await message.answer("💸 Chegirma matnini kiriting." + CANCEL_HINT)
+    raw_text = (message.text or "").strip()
+    if not raw_text:
+        await message.answer(
+            _with_cancel_hint("❌ Iltimos, matn yuboring."),
+            parse_mode="HTML",
+        )
         return
 
-    phone_value = _safe_text(data.get(STATE_PHONE_KEY))
-    if phone_value == "—":
-        await state.update_data(**{STATE_STEP_KEY: STEP_PHONE})
-        await message.answer("⚠️ Telefon raqamini qayta kiriting." + CANCEL_HINT)
-        return
-
-    if len(text) > 255:
-        await message.answer("⚠️ Chegirma matni 255 belgidan oshmasligi kerak." + CANCEL_HINT)
-        return
-
-    if current_state == InfoFSM.adding.state:
-        async with async_session() as session:
-            try:
-                total = int(await session.scalar(select(func.count(InfoExpanded.id))) or 0)
-                if total > 0:
-                    await state.clear()
-                    await message.answer("⚠️ Info mavjud. Yangi qo'shish o'rniga tahrirlashdan foydalaning.")
-                    await _show_page_message(message, state, page=page)
-                    return
-
-                new_item = InfoExpanded(phone_number=phone_value, discount=text)
-                session.add(new_item)
-                await session.commit()
-            except SQLAlchemyError:
-                await session.rollback()
-                await message.answer("❌ Saqlashda xatolik yuz berdi.")
-                return
-
+    data = await state.get_data()
+    field_key = data.get(INFO_PROFILE_FIELD_KEY)
+    preview_message_id = data.get(INFO_PROFILE_MESSAGE_ID_KEY)
+    if field_key not in EDITABLE_INFO_FIELDS:
         await state.clear()
-        await message.answer("✅ Info saqlandi.")
-        await _show_page_message(message, state, page=page)
+        await message.answer("❌ Jarayon buzildi. Qayta urinib ko'ring.")
         return
 
-    if current_state == InfoFSM.editing.state:
-        if target_id <= 0:
-            await state.clear()
-            await message.answer("⚠️ Tahrirlash uchun tanlangan info topilmadi.")
-            await _show_page_message(message, state, page=page)
-            return
-
-        async with async_session() as session:
-            try:
-                row = await session.get(InfoExpanded, target_id)
-                if not row:
-                    await state.clear()
-                    await message.answer("⚠️ Tanlangan info topilmadi.")
-                    await _show_page_message(message, state, page=page)
-                    return
-
-                row.phone_number = phone_value
-                row.discount = text
-                await session.commit()
-            except SQLAlchemyError:
-                await session.rollback()
-                await message.answer("❌ Yangilashda xatolik yuz berdi.")
-                return
-
-        await state.clear()
-        await message.answer("✅ Info yangilandi.")
-        await _show_page_message(message, state, page=page)
+    normalized_value, error_text = _normalize_field_value(field_key, raw_text)
+    if error_text:
+        await message.answer(
+            _with_cancel_hint(f"❌ {error_text}"),
+            parse_mode="HTML",
+        )
         return
+
+    config = EDITABLE_INFO_FIELDS[field_key]
+    if config["table"] == "info":
+        await update_info_fields({field_key: normalized_value})
+    else:
+        await update_info_expanded_fields({field_key: normalized_value})
+
+    if field_key in HIDEABLE_INFO_FIELDS:
+        await set_info_field_visibility(field_key, False)
 
     await state.clear()
-    await message.answer("⚠️ Noma'lum holat. Jarayon bekor qilindi.")
-    await _show_page_message(message, state, page=page)
+    shown_message_id = await _show_info_preview(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        message_id=preview_message_id,
+        notice=f"<b>{escape(config['label'])} yangilandi.</b>",
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await message.answer(f"{config['label']} yangilandi.")
+
+
+@router.message(InfoAdminState.waiting_for_location)
+async def save_info_location(message: types.Message, state: FSMContext) -> None:
+    if not await ensure_admin_message(message):
+        await state.clear()
+        return
+
+    location = message.location
+    venue = message.venue
+    if location is None and venue is not None:
+        location = venue.location
+
+    if location is None:
+        await message.answer(
+            _with_cancel_hint("❌ Lokatsiya yoki venue yuboring."),
+            parse_mode="HTML",
+        )
+        return
+
+    updates = {
+        "latitude": float(location.latitude),
+        "longitude": float(location.longitude),
+    }
+    if venue is not None and str(getattr(venue, "address", "") or "").strip():
+        updates["address_text"] = venue.address.strip()
+
+    await update_info_fields(updates)
+    preview_message_id = (await state.get_data()).get(INFO_PROFILE_MESSAGE_ID_KEY)
+    await state.clear()
+    shown_message_id = await _show_info_preview(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        message_id=preview_message_id,
+        notice="<b>Xarita ma'lumotlari yangilandi.</b>",
+    )
+    await state.update_data(**{INFO_PROFILE_MESSAGE_ID_KEY: shown_message_id})
+    await message.answer("Xarita yangilandi.")

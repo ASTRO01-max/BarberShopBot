@@ -13,6 +13,7 @@ from .service_discount import router as service_discount_router
 from .service_profile import router as service_profile_router
 from .special_message import router as broadcast_router
 from.info_handle import router as info_handle_router
+from .start_vd_or_img import router as start_vd_or_img_router
 
 router = Router()
 router.include_router(admin_router)
@@ -26,3 +27,4 @@ router.include_router(stats_router)
 router.include_router(orders_router)
 router.include_router(broadcast_router)
 router.include_router(info_handle_router)
+router.include_router(start_vd_or_img_router)

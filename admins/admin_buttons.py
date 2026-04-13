@@ -1,3 +1,5 @@
+# admins/admin_buttons.py
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -32,13 +34,25 @@ INFO_DELETE_TEXT = "❌ Info o'chirish"
 INFO_ADD_CB = "info:add"
 INFO_EDIT_CB = "info:edit"
 INFO_DELETE_CB = "info:delete"
+INFO_MENU_TEXT = "ℹ️ Info"
+INFO_ADD_TEXT = "ℹ️ Info kiritish"
+INFO_EDIT_TEXT = "✏️ Info tahrirlash"
+INFO_DELETE_TEXT = "❌ Info o'chirish"
 
 ADMIN_MAIN_MENU_TITLE = "<b>Admin bo'limlari</b>\n\nKerakli bo'limni tanlang."
 ADMIN_DISCOUNT_MENU_TEXT = "🏷  Chegirma qo'yish"
 ADMIN_SERVICE_PROFILE_MENU_TEXT = "💈 Xizmat Profili"
+ADMIN_START_VD_OR_IMG = "Kirish media sahnasi"
+ADMIN_START_VD_OR_IMG_CB = "admin_vd_or_img_menu"
 ADMIN_DISCOUNT_MENU_CB = "admin_discount_menu"
 ADMIN_SERVICE_PROFILE_MENU_CB = "admin_service_profile_menu"
 ADMIN_MAIN_MENU_BACK_CB = "admin_main_menu_back"
+START_MEDIA_VIDEO_TEXT = "Video qo'yish"
+START_MEDIA_IMAGE_TEXT = "Rasm qo'yish"
+START_MEDIA_CLEAR_TEXT = "Video yoki Rasmni bekor qilish"
+START_MEDIA_VIDEO_CB = "start_media:set_video"
+START_MEDIA_IMAGE_CB = "start_media:set_image"
+START_MEDIA_CLEAR_CB = "start_media:clear"
 
 
 def get_admin_inline_actions_kb() -> InlineKeyboardMarkup:
@@ -85,6 +99,16 @@ def get_info_inline_actions_kb() -> InlineKeyboardMarkup:
     )
 
 
+def get_start_media_inline_actions_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=START_MEDIA_VIDEO_TEXT, callback_data=START_MEDIA_VIDEO_CB)],
+            [InlineKeyboardButton(text=START_MEDIA_IMAGE_TEXT, callback_data=START_MEDIA_IMAGE_CB)],
+            [InlineKeyboardButton(text=START_MEDIA_CLEAR_TEXT, callback_data=START_MEDIA_CLEAR_CB)],
+        ]
+    )
+
+
 def build_main_menu_rows() -> list[list[InlineKeyboardButton]]:
     return [
         [
@@ -99,12 +123,17 @@ def build_main_menu_rows() -> list[list[InlineKeyboardButton]]:
                 callback_data=ADMIN_SERVICE_PROFILE_MENU_CB,
             )
         ],
+        [
+            InlineKeyboardButton(
+                text=ADMIN_START_VD_OR_IMG,
+                callback_data=ADMIN_START_VD_OR_IMG_CB,
+            )
+        ],
     ]
 
 
 def get_main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=build_main_menu_rows())
-
 
 markup = ReplyKeyboardMarkup(
     keyboard=[

@@ -74,3 +74,97 @@ async def init_db():
                 """
             )
         )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE start_vd_or_img
+                ADD COLUMN IF NOT EXISTS vd_file_id VARCHAR(300)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE start_vd_or_img
+                ADD COLUMN IF NOT EXISTS img_file_id VARCHAR(300)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE info_expanded
+                ADD COLUMN IF NOT EXISTS phone_number2 VARCHAR(30)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE info_profile_settings
+                ADD COLUMN IF NOT EXISTS info_id BIGINT
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE info_profile_settings
+                ADD COLUMN IF NOT EXISTS hidden_fields JSON NOT NULL DEFAULT '[]'::json
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                UPDATE info_profile_settings
+                SET info_id = 1
+                WHERE info_id IS NULL
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_info_profile_settings_info_id
+                ON info_profile_settings (info_id)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.table_constraints
+                        WHERE table_name = 'info_profile_settings'
+                        AND constraint_name = 'info_profile_settings_info_id_fkey'
+                    ) THEN
+                        ALTER TABLE info_profile_settings
+                        DROP CONSTRAINT info_profile_settings_info_id_fkey;
+                    END IF;
+                END $$;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.table_constraints
+                        WHERE table_name = 'info_profile_settings'
+                        AND constraint_name = 'info_profile_settings_info_id_fkey'
+                    ) THEN
+                        ALTER TABLE info_profile_settings
+                        ADD CONSTRAINT info_profile_settings_info_id_fkey
+                        FOREIGN KEY (info_id) REFERENCES info(id) ON DELETE CASCADE;
+                    END IF;
+                END $$;
+                """
+            )
+        )

@@ -195,7 +195,7 @@ def _queue_order_detail_text(order, card) -> str:
     status = card.get("status") or _queue_status_label(order.date)
     return (
         "📌 <b>Navbat tafsiloti:</b>\n\n"
-        f"🆔 <b>ID:</b> {order.id}\n"
+        # f"🆔 <b>ID:</b> {order.id}\n"
         f"👤 <b>Mijoz:</b> {order.fullname}\n"
         f"📞 <b>Tel:</b> {order.phonenumber}\n"
         f"💈 <b>Barber:</b> {card['barber']}\n"
@@ -229,8 +229,7 @@ def _queue_search_results_text(
         f"🧭 <b>Tur:</b> {_search_type_label(search_type)}\n"
         f"🔍 <b>So'rov:</b> {search_value}\n"
         f"📄 <b>Sahifa:</b> {page}/{total_pages}\n"
-        f"📦 <b>Jami:</b> {total_orders}\n\n"
-        "📌 <b>Navbat tafsiloti:</b>"
+        f"📦 <b>Jami:</b> {total_orders}\n"
     )
 
 
@@ -418,7 +417,7 @@ def _prepare_queue_order_cards(orders):
     for order in orders:
         cards.append(
             {
-                "id": order.id,
+                # "id": order.id,
                 "fullname": order.fullname,
                 "phonenumber": order.phonenumber,
                 "service_id": order.service_id,
@@ -457,9 +456,9 @@ def _queue_page_text(order_cards, page: int, today_count: int, future_count: int
         "🗂 *Navbatlar bo'limi*\n"
         f"📅 Bugungi navbatlar: {today_count}\n"
         f"⏳ Kelgusi navbatlar: {future_count}\n\n"
-        "🗂 *Navbat tafsiloti:*\n"
+        # "🗂 *Navbat tafsiloti:*\n"
         f"📄 Sahifa: {page + 1}/{total_pages}\n"
-        f"🆔 ID: {current['id']}\n\n"
+        # f"🆔 ID: {current['id']}\n\n"
         f"👤 Mijoz: {current['fullname']}\n"
         f"📞 Tel: {current['phonenumber']}\n"
         f"🧾 Xizmat ID: {current['service_id']}\n"
@@ -504,7 +503,7 @@ def _queue_page_markup(order_cards, page: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(
                 text="❌ Navbatni o'chirish",
-                callback_data=f"queue_pick:{current['id']}:{page}",
+                callback_data=f"queue_pick:{page}",
             )
         ]
     )

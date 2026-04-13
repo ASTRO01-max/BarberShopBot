@@ -1,4 +1,5 @@
 # sql/models.py
+
 from sqlalchemy import (
     Column,
     Integer,
@@ -174,12 +175,24 @@ class InfoExpanded(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     phone_number = Column(String(30), nullable=True)
-    discount = Column(String(255), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    phone_number2 = Column(String(30), nullable=True)
 
     def __repr__(self):
-        return f"<InfoExpanded id={self.id} phone_number={self.phone_number}>"
+        return f"<InfoExpanded id={self.id} phone_number={self.phone_number} phone-number2={self.phone_number2}>"
+
+
+class InfoProfileSettings(Base):
+    __tablename__ = "info_profile_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    info_id = Column(
+        BigInteger,
+        ForeignKey("info.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    hidden_fields = Column(JSON, nullable=False, default=list)
 
 
 class BarberOrderInbox(Base):
@@ -226,4 +239,12 @@ class BarberProfileSettings(Base):
         primary_key=True,
     )
     hidden_fields = Column(JSON, nullable=False, default=list)
+    
+
+class StartVdOrImg(Base):
+    __tablename__ = "start_vd_or_img"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vd_file_id = Column(String(300), nullable=True)
+    img_file_id = Column(String(300), nullable=True)
     

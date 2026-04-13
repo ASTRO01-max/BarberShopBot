@@ -15,6 +15,7 @@ from sql.db_services import (
 )
 from sql.models import Services
 from utils.discounts import format_discount_percent
+from utils.get_file_id import get_photo_file_id
 from utils.service_pricing import get_service_price_snapshot
 from utils.states import AdminServiceProfileStates
 from utils.validators import INT32_MAX
@@ -575,7 +576,9 @@ async def ask_service_profile_photo(callback: types.CallbackQuery, state: FSMCon
         service_index=index,
     )
     await callback.message.answer(
-        with_cancel_hint("🖼 Yangi xizmat rasmini yuboring."),
+        with_cancel_hint(
+            "🖼 Yangi xizmat rasmini yuboring. Yuborilgan rasmning Telegram file_id qiymati shu xizmatga saqlanadi."
+        ),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -666,9 +669,17 @@ async def save_service_profile_photo(message: types.Message, state: FSMContext) 
         await message.answer("❌ Jarayon buzildi. Qayta urinib ko'ring.")
         return
 
+    photo_file_id = get_photo_file_id(message)
+    if not photo_file_id:
+        await message.answer(
+            with_cancel_hint("❌ Rasm file_id olinmadi. Rasmni qaytadan yuboring."),
+            parse_mode="HTML",
+        )
+        return
+
     updated_service = await update_service(
         int(service_id),
-        {"photo": message.photo[-1].file_id},
+        {"photo": photo_file_id},
     )
     if updated_service is None:
         await state.clear()
