@@ -10,7 +10,7 @@ phone_request_keyboard = ReplyKeyboardMarkup(
     one_time_keyboard=True
 )
 
-queue_btn = KeyboardButton(text="🗂Navbatlar")
+queue_btn = KeyboardButton(text="🗂 Navbatlar")
 user_database_btn = KeyboardButton(text="📥 Foydalanuvchi ma'lumotlari")
 
 

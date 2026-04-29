@@ -152,6 +152,64 @@ async def init_db():
         await conn.execute(
             text(
                 """
+                ALTER TABLE IF EXISTS orders
+                ADD COLUMN IF NOT EXISTS service_name VARCHAR(50)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                UPDATE orders
+                SET service_name = service_id
+                WHERE service_name IS NULL
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE IF EXISTS temporary_orders
+                ADD COLUMN IF NOT EXISTS is_for_other BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE IF EXISTS temporary_orders
+                ADD COLUMN IF NOT EXISTS current_state VARCHAR(100)
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE IF EXISTS temporary_orders
+                ADD COLUMN IF NOT EXISTS selected_barber_locked BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE IF EXISTS temporary_orders
+                ALTER COLUMN fullname DROP NOT NULL,
+                ALTER COLUMN phonenumber DROP NOT NULL,
+                ALTER COLUMN service_id DROP NOT NULL,
+                ALTER COLUMN service_name DROP NOT NULL,
+                ALTER COLUMN barber_id DROP NOT NULL,
+                ALTER COLUMN barber_id_name DROP NOT NULL,
+                ALTER COLUMN date DROP NOT NULL,
+                ALTER COLUMN time DROP NOT NULL,
+                ALTER COLUMN booked_date DROP NOT NULL,
+                ALTER COLUMN booked_time DROP NOT NULL
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
                 DO $$
                 BEGIN
                     IF NOT EXISTS (

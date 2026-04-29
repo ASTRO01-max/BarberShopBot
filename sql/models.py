@@ -18,6 +18,7 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.sql import func
 from sql.db import Base
 
+
 #Vaqtinchalik foydalanuvchi
 class OrdinaryUser(Base):
     __tablename__ = "ordinary_users"
@@ -31,6 +32,7 @@ class OrdinaryUser(Base):
     def __repr__(self):
         return f"<OrdinaryUser tg_id={self.tg_id}, username={self.username}>"
 
+
 #USERS foydalanuvchilar
 class User(Base):
     __tablename__ = "users"
@@ -39,6 +41,7 @@ class User(Base):
     tg_id = Column(BigInteger, unique=True, nullable=False, index=True)
     fullname = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
+
 
 #Buyurtmalar
 class Order(Base):
@@ -49,12 +52,35 @@ class Order(Base):
     fullname = Column(String(100), nullable=False)
     phonenumber = Column(String(30), nullable=False)
     service_id = Column(String(50), nullable=False)
+    service_name = Column(String(50), nullable=False)
     barber_id = Column(String(50), nullable=False)
     barber_id_name = Column(String(100), nullable=False)
     date = Column(Date, nullable=False)
     time = Column(Time, nullable=False)
     booked_date = Column(Date, nullable=False)
     booked_time = Column(Time, nullable=False)
+
+
+#Vaqtinchalik Navbat ma'lumotlari
+class TemporaryOrder(Base):
+    __tablename__ = "temporary_orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    is_for_other = Column(Boolean, nullable=False, default=False)
+    current_state = Column(String(100), nullable=True)
+    selected_barber_locked = Column(Boolean, nullable=False, default=False)
+    fullname = Column(String(100), nullable=True)
+    phonenumber = Column(String(30), nullable=True)
+    service_id = Column(String(50), nullable=True)
+    service_name = Column(String(50), nullable=True)
+    barber_id = Column(String(50), nullable=True)
+    barber_id_name = Column(String(100), nullable=True)
+    date = Column(Date, nullable=True)
+    time = Column(Time, nullable=True)
+    booked_date = Column(Date, nullable=True)
+    booked_time = Column(Time, nullable=True)
+
 
 #Admin foydalanuvchilar
 class Admins(Base):

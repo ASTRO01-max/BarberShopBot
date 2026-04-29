@@ -101,6 +101,18 @@ dp.callback_query.register(
     lambda c: c.data == "booking_for_other"
 )
 
+dp.callback_query.register(
+    booking.booking_resume_continue_callback,
+    booking.UserState.waiting_for_resume_booking,
+    lambda c: c.data == booking.BOOKING_RESUME_CONTINUE_CB
+)
+
+dp.callback_query.register(
+    booking.booking_resume_restart_callback,
+    booking.UserState.waiting_for_resume_booking,
+    lambda c: c.data == booking.BOOKING_RESUME_RESTART_CB
+)
+
 dp.include_router(main_btn_router)
 
 # FSM - Xizmat tanlash
@@ -188,6 +200,7 @@ dp.callback_query.register(
 
 # FSM - Booking bekor qilish (/cancel)
 BOOKING_CANCEL_STATES = (
+    booking.UserState.waiting_for_resume_booking,
     booking.UserState.waiting_for_booking_target,
     booking.UserState.waiting_for_fullname,
     booking.UserState.waiting_for_phonenumber,

@@ -229,7 +229,7 @@ def _queue_search_results_text(
         f"🧭 <b>Tur:</b> {_search_type_label(search_type)}\n"
         f"🔍 <b>So'rov:</b> {search_value}\n"
         f"📄 <b>Sahifa:</b> {page}/{total_pages}\n"
-        f"📦 <b>Jami:</b> {total_orders}\n"
+        f"📦 <b>Jami:</b> {total_orders}"
     )
 
 

@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.future import select
 from sqlalchemy import delete
 from .db import async_session
-from .models import Order, Barbers
+from .models import Order, Barbers, Services
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,22 @@ async def save_order(order: dict):
             service_id = order.get("service_id") or order.get("service")
             if service_id is None:
                 raise ValueError("service_id is required")
+            service_id = str(service_id)
+
+            service_name = order.get("service_name")
+            if not service_name:
+                service = None
+                try:
+                    if service_id.isdigit():
+                        service = await session.get(Services, int(service_id))
+                except (TypeError, ValueError):
+                    service = None
+
+                if service is None:
+                    result = await session.execute(select(Services).where(Services.name == service_id))
+                    service = result.scalars().first()
+
+                service_name = service.name if service else service_id
 
             barber_id_raw = order.get("barber_id") or order.get("barber")
             if barber_id_raw is None:
@@ -104,6 +120,7 @@ async def save_order(order: dict):
                 fullname=fullname,
                 phonenumber=phonenumber,
                 service_id=service_id,
+                service_name=service_name,
                 barber_id=barber_id,
                 barber_id_name=barber_id_name,
                 date=date_val,

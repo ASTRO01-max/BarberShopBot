@@ -28,8 +28,9 @@ START_ENTRY_CAPTION = (
     "Bu bot orqali barbershop xizmatlariga onlayn navbat olishingiz mumkin.\n\n"
     "👇 Boshlash tugmasini bosing:"
 )
+
 WELCOME_TEXT = "👋 Xush kelibsiz! Quyidagi menyudan birini tanlang:"
-MAIN_MENU_TEXT =  "🏠 Asosiy menyu:"
+MAIN_MENU_TEXT =  "🏠 <b>Asosiy menyudan kerakli bo‘limni tanlang 👇</b>"
 
 
 def normalize_fancy(text: str) -> str | None:
@@ -82,6 +83,7 @@ async def _launch_bot_home(
     await message.answer(
         MAIN_MENU_TEXT,
         reply_markup=get_main_menu(),
+        parse_mode="HTML"
     )
 
 

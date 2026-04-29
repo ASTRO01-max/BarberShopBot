@@ -21,9 +21,15 @@ from handlers.barber_cards import barber_full_name, get_barber_card_content
 from sql.db import async_session
 from sql.db_services import list_services_ordered
 from sql.db_barbers_expanded import get_barbers_by_service
-from sql.db_order_utils import save_order
+from sql.db_temporary_orders import (
+    delete_temporary_order,
+    finalize_temporary_order,
+    get_temporary_order,
+    is_temporary_order_complete,
+    upsert_temporary_order,
+)
 from sql.db_users_utils import get_user, save_user
-from sql.models import Barbers, Order, Services
+from sql.models import Barbers, OrdinaryUser, Services, Order
 from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.emoji_map import SERVICE_EMOJIS
 from utils.service_pricing import build_service_price_lines
@@ -34,13 +40,16 @@ from utils.validators import parse_user_date
 logger = logging.getLogger(__name__)
 router = Router()
 
-CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
-BOOKING_CANCELLED_TEXT = "❌ Navbat olish jarayoni bekor qilindi.\n\n🏠 Asosiy menyuga qaytdingiz."
+CANCEL_HINT = "\n\n↩️ Bekor qilish uchun /cancel yuboring."
+BOOKING_CANCELLED_TEXT = "🚫 Navbat olish jarayoni bekor qilindi.\n\n🏠 Asosiy menyuga qaytdingiz."
 BOOKING_FOR_ME_CB = "booking_for_me"
 BOOKING_FOR_OTHER_CB = "booking_for_other"
-NO_BARBER_FOR_SERVICE_TEXT = "Hozircha ushbu xizmat uchun barber mavjud emas"
+BOOKING_RESUME_CONTINUE_CB = "booking_resume_continue"
+BOOKING_RESUME_RESTART_CB = "booking_resume_restart"
+NO_BARBER_FOR_SERVICE_TEXT = "🛑 Hozircha ushbu xizmat uchun barber mavjud emas"
 SELECTED_BARBER_UNAVAILABLE_TEXT = "❌ Tanlangan barber ushbu xizmatni bajarmaydi."
 LOCKED_BARBER_STATE_KEY = "selected_barber_locked"
+PENDING_BOOKING_ENTRY_KEY = "pending_booking_entry"
 TIME_BUTTONS_PER_ROW = 2
 DEFAULT_EXISTING_ORDER_DURATION_MINUTES = 60
 ISO_DATE_FORMAT = "%Y-%m-%d"
@@ -57,7 +66,195 @@ TIME_TOKEN_PATTERN = re.compile(r"\d{1,2}:\d{2}")
 
 
 def with_cancel_hint(text: str) -> str:
-    return f"{text}{CANCEL_HINT}"
+    return f"<b>{text}</b>{CANCEL_HINT}"
+
+
+def _state_value(state: State | str | None) -> str | None:
+    if state is None:
+        return None
+    if isinstance(state, State):
+        return state.state
+    return str(state)
+
+
+def _booking_resume_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Davom ettirish", callback_data=BOOKING_RESUME_CONTINUE_CB)],
+            [InlineKeyboardButton(text="Qaytadan boshlash", callback_data=BOOKING_RESUME_RESTART_CB)],
+        ]
+    )
+
+
+def _build_entry_context(
+    kind: str,
+    *,
+    service_id: str | None = None,
+    barber_id: str | None = None,
+) -> dict[str, str]:
+    payload = {"kind": kind}
+    if service_id is not None:
+        payload["service_id"] = str(service_id)
+    if barber_id is not None:
+        payload["barber_id"] = str(barber_id)
+    return payload
+
+
+def _build_ordinary_fullname(ordinary_user: OrdinaryUser | None) -> str | None:
+    if ordinary_user is None:
+        return None
+
+    first_name = (ordinary_user.first_name or "").strip()
+    last_name = (ordinary_user.last_name or "").strip()
+    if not first_name or not last_name:
+        return None
+    return f"{first_name} {last_name}"
+
+
+async def _get_self_booking_seed(user_id: int) -> dict[str, str | None]:
+    seed: dict[str, str | None] = {"fullname": None, "phonenumber": None}
+    user = await get_user(user_id)
+    if user:
+        seed["fullname"] = (user.fullname or "").strip() or None
+        seed["phonenumber"] = (user.phone or "").strip() or None
+
+    if seed["fullname"]:
+        return seed
+
+    async with async_session() as session:
+        result = await session.execute(select(OrdinaryUser).where(OrdinaryUser.tg_id == user_id))
+        ordinary_user = result.scalars().first()
+
+    seed["fullname"] = _build_ordinary_fullname(ordinary_user)
+    return seed
+
+
+def _resolve_initial_self_state(seed: dict[str, str | None]) -> State:
+    if seed.get("fullname") and seed.get("phonenumber"):
+        return UserState.waiting_for_service
+    if seed.get("fullname"):
+        return UserState.waiting_for_phonenumber
+    return UserState.waiting_for_fullname
+
+
+async def _persist_booking_state(
+    user_id: int,
+    state: FSMContext,
+    *,
+    next_state: State | None = None,
+    **updates,
+):
+    if updates:
+        await state.update_data(**updates)
+    if next_state is not None:
+        await state.set_state(next_state)
+
+    data = await state.get_data()
+    current_state = _state_value(next_state) or await state.get_state()
+    await upsert_temporary_order(
+        {
+            "user_id": user_id,
+            "current_state": current_state,
+            "is_for_other": bool(data.get("is_for_other")),
+            "selected_barber_locked": bool(data.get(LOCKED_BARBER_STATE_KEY)),
+            "fullname": data.get("fullname"),
+            "phonenumber": data.get("phonenumber"),
+            "service_id": str(data["service_id"]) if data.get("service_id") is not None else None,
+            "barber_id": str(data["barber_id"]) if data.get("barber_id") is not None else None,
+            "date": data.get("date"),
+            "time": data.get("time"),
+        }
+    )
+
+
+async def _delete_temporary_order_safely(user_id: int):
+    try:
+        await delete_temporary_order(user_id)
+    except Exception:
+        logger.exception("Failed to delete temporary booking for user_id=%s", user_id)
+
+
+async def _ask_phonenumber_from_callback(callback: CallbackQuery):
+    await callback.message.answer(
+        with_cancel_hint("📱 Iltimos, telefon raqamingizni kiriting yoki tugma orqali yuboring:"),
+        reply_markup=phone_request_keyboard,
+    )
+
+
+async def _show_booking_target_prompt(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(UserState.waiting_for_booking_target)
+    text = with_cancel_hint("Kim uchun navbat olmoqchisiz?")
+    markup = _booking_target_keyboard()
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, reply_markup=markup, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+
+async def _prompt_resume_booking(
+    callback: CallbackQuery,
+    state: FSMContext,
+    entry_context: dict[str, str],
+):
+    await state.clear()
+    await state.update_data(**{PENDING_BOOKING_ENTRY_KEY: entry_context})
+    await state.set_state(UserState.waiting_for_resume_booking)
+    text = with_cancel_hint(
+        "Sizda yakunlanmagan navbat olish jarayoni mavjud.\n\nDavom ettirishni xohlaysizmi?"
+    )
+    keyboard = _booking_resume_keyboard()
+    if callback.message.photo:
+        await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def _maybe_prompt_resume_booking(
+    callback: CallbackQuery,
+    state: FSMContext,
+    entry_context: dict[str, str],
+) -> bool:
+    temp_order = await get_temporary_order(callback.from_user.id)
+    if temp_order is None:
+        return False
+
+    await _prompt_resume_booking(callback, state, entry_context)
+    await callback.answer("Yakunlanmagan booking topildi ✅")
+    return True
+
+
+def _booking_state_from_value(state_value: str | None) -> State | None:
+    state_map = {
+        UserState.waiting_for_fullname.state: UserState.waiting_for_fullname,
+        UserState.waiting_for_phonenumber.state: UserState.waiting_for_phonenumber,
+        UserState.waiting_for_service.state: UserState.waiting_for_service,
+        UserState.waiting_for_barber.state: UserState.waiting_for_barber,
+        UserState.waiting_for_date.state: UserState.waiting_for_date,
+        UserState.waiting_for_time.state: UserState.waiting_for_time,
+    }
+    return state_map.get(state_value)
+
+
+async def _infer_resume_state(user_id: int, temp_order) -> State:
+    stored_state = _booking_state_from_value(getattr(temp_order, "current_state", None))
+    if stored_state is not None:
+        return stored_state
+
+    if temp_order.date and temp_order.barber_id and temp_order.service_id:
+        return UserState.waiting_for_time
+    if temp_order.barber_id and temp_order.service_id:
+        return UserState.waiting_for_date
+    if temp_order.service_id:
+        return UserState.waiting_for_barber
+    if temp_order.phonenumber:
+        return UserState.waiting_for_service
+    if temp_order.fullname:
+        return UserState.waiting_for_phonenumber
+    if temp_order.is_for_other:
+        return UserState.waiting_for_fullname
+
+    return _resolve_initial_self_state(await _get_self_booking_seed(user_id))
 
 
 async def _ensure_callback_state(
@@ -74,6 +271,7 @@ async def _ensure_callback_state(
 
 
 async def _finish_booking_cancel(message: Message, state: FSMContext):
+    await _delete_temporary_order_safely(message.from_user.id)
     await state.clear()
     await message.answer(
         BOOKING_CANCELLED_TEXT,
@@ -85,6 +283,7 @@ async def _show_locked_barber_unavailable_callback(
     callback: CallbackQuery,
     state: FSMContext,
 ):
+    await _delete_temporary_order_safely(callback.from_user.id)
     await state.clear()
     await _render_catalog_callback(
         callback,
@@ -98,6 +297,7 @@ async def _show_locked_barber_unavailable_message(
     message: Message,
     state: FSMContext,
 ):
+    await _delete_temporary_order_safely(message.from_user.id)
     await state.clear()
     await message.answer(
         SELECTED_BARBER_UNAVAILABLE_TEXT,
@@ -188,6 +388,23 @@ def _normalize_time_value(raw_time: time | datetime | str | None) -> time | None
             except ValueError:
                 continue
     return None
+
+
+def _date_to_iso(value: date | datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().strftime(ISO_DATE_FORMAT)
+    if isinstance(value, date):
+        return value.strftime(ISO_DATE_FORMAT)
+    return str(value)
+
+
+def _time_to_hm(value: time | datetime | str | None) -> str | None:
+    normalized = _normalize_time_value(value)
+    if normalized is None:
+        return None
+    return normalized.strftime(HM_TIME_FORMAT)
 
 
 def _combine_local_datetime(target_date: date, target_time: time, tzinfo) -> datetime:
@@ -629,6 +846,149 @@ async def _show_barber_page_message(message: Message, service_id: str, index: in
     return True
 
 
+async def _edit_callback_message_text(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+):
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+        else:
+            await callback.message.edit_text(
+                text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+    except Exception:
+        await callback.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def _start_self_booking_flow(
+    callback: CallbackQuery,
+    state: FSMContext,
+    *,
+    service_id: str | None = None,
+    barber_id: str | None = None,
+    locked_barber: bool = False,
+) -> State:
+    user_id = callback.from_user.id
+    seed = await _get_self_booking_seed(user_id)
+    initial_state = _resolve_initial_self_state(seed)
+
+    await state.clear()
+    await _persist_booking_state(
+        user_id,
+        state,
+        next_state=initial_state,
+        is_for_other=False,
+        fullname=seed.get("fullname"),
+        phonenumber=seed.get("phonenumber"),
+        service_id=service_id,
+        barber_id=barber_id,
+        date=None,
+        time=None,
+        **{LOCKED_BARBER_STATE_KEY: locked_barber},
+    )
+    return initial_state
+
+
+async def _start_booking_for_other(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await _persist_booking_state(
+        callback.from_user.id,
+        state,
+        next_state=UserState.waiting_for_fullname,
+        is_for_other=True,
+        fullname=None,
+        phonenumber=None,
+        service_id=None,
+        barber_id=None,
+        date=None,
+        time=None,
+        **{LOCKED_BARBER_STATE_KEY: False},
+    )
+    await _ask_fullname(callback)
+    await callback.answer("Boshqa shaxs uchun ma'lumot kiriting ✅")
+
+
+async def _start_booking_from_service_id(
+    callback: CallbackQuery,
+    state: FSMContext,
+    service_id: str,
+):
+    initial_state = await _start_self_booking_flow(
+        callback,
+        state,
+        service_id=service_id,
+    )
+
+    if initial_state == UserState.waiting_for_fullname:
+        await _ask_fullname(callback)
+        await callback.answer("Xizmat tanlandi, ro'yxatdan o'tamiz ✅")
+        return
+
+    if initial_state == UserState.waiting_for_phonenumber:
+        await _ask_phonenumber_from_callback(callback)
+        await callback.answer("Xizmat tanlandi, telefon raqamini kiriting ✅")
+        return
+
+    await _handle_service_selected(callback, state, service_id)
+
+
+async def _start_booking_from_barber_id(
+    callback: CallbackQuery,
+    state: FSMContext,
+    barber_id: str,
+):
+    initial_state = await _start_self_booking_flow(
+        callback,
+        state,
+        barber_id=barber_id,
+        locked_barber=True,
+    )
+
+    if initial_state == UserState.waiting_for_fullname:
+        await _ask_fullname(callback)
+        await callback.answer("Barber tanlandi, ro'yxatdan o'tamiz ✅")
+        return
+
+    if initial_state == UserState.waiting_for_phonenumber:
+        await _ask_phonenumber_from_callback(callback)
+        await callback.answer("Barber tanlandi, telefon raqamini kiriting ✅")
+        return
+
+    shown = await _show_service_page_callback(callback, index=0)
+    if shown:
+        await callback.answer("Barber tanlandi, xizmatni tanlang ✅")
+    else:
+        await callback.answer("Xizmatlar topilmadi", show_alert=True)
+
+
+async def _restart_booking_from_entry_context(
+    callback: CallbackQuery,
+    state: FSMContext,
+    entry_context: dict[str, str] | None,
+):
+    context = entry_context or _build_entry_context("root")
+    kind = context.get("kind")
+
+    if kind == "service" and context.get("service_id"):
+        await _start_booking_from_service_id(callback, state, context["service_id"])
+        return
+
+    if kind == "barber" and context.get("barber_id"):
+        await _start_booking_from_barber_id(callback, state, context["barber_id"])
+        return
+
+    await _show_booking_target_prompt(callback, state)
+    await callback.answer()
+
+
 async def _has_user_profile(user_id: int, state: FSMContext) -> bool:
     state_data = await state.get_data()
     if state_data.get("fullname") and state_data.get("phonenumber"):
@@ -656,7 +1016,15 @@ async def _go_to_date_from_callback(
     barber_id: str,
     answer_text: str,
 ):
-    await state.update_data(service_id=service_id, barber_id=barber_id)
+    await _persist_booking_state(
+        callback.from_user.id,
+        state,
+        next_state=UserState.waiting_for_date,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=None,
+        time=None,
+    )
     if callback.message.photo:
         await callback.message.edit_caption(
             caption=with_cancel_hint("📅 Sana tanlang:"),
@@ -667,7 +1035,6 @@ async def _go_to_date_from_callback(
             with_cancel_hint("📅 Sana tanlang:"),
             reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id),
         )
-    await state.set_state(UserState.waiting_for_date)
     await callback.answer(answer_text)
 
 
@@ -677,16 +1044,406 @@ async def _go_to_date_from_message(
     service_id: str,
     barber_id: str,
 ):
-    await state.update_data(service_id=service_id, barber_id=barber_id)
+    await _persist_booking_state(
+        message.from_user.id,
+        state,
+        next_state=UserState.waiting_for_date,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=None,
+        time=None,
+    )
     await message.answer(
         with_cancel_hint("📅 Sana tanlang:"),
         reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id),
     )
-    await state.set_state(UserState.waiting_for_date)
+
+
+async def _show_time_selection_callback(
+    callback: CallbackQuery,
+    state: FSMContext,
+    service_id: str,
+    barber_id: str,
+    date_str: str,
+    *,
+    answer_text: str,
+):
+    await _persist_booking_state(
+        callback.from_user.id,
+        state,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=date_str,
+        time=None,
+    )
+    keyboard = await _build_time_keyboard(service_id, barber_id, date_str)
+
+    if keyboard is None:
+        back_markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔙 Orqaga",
+                        callback_data=f"back_date_{service_id}_{barber_id}",
+                    )
+                ]
+            ]
+        )
+        await _edit_callback_message_text(
+            callback,
+            with_cancel_hint("❌ Kechirasiz, bu kunga barcha vaqtlar band."),
+            back_markup,
+        )
+        await _persist_booking_state(
+            callback.from_user.id,
+            state,
+            next_state=UserState.waiting_for_date,
+            service_id=service_id,
+            barber_id=barber_id,
+            date=date_str,
+            time=None,
+        )
+    else:
+        await _edit_callback_message_text(
+            callback,
+            with_cancel_hint("⏰ Vaqt tanlang:"),
+            keyboard,
+        )
+        await _persist_booking_state(
+            callback.from_user.id,
+            state,
+            next_state=UserState.waiting_for_time,
+            service_id=service_id,
+            barber_id=barber_id,
+            date=date_str,
+            time=None,
+        )
+
+    await callback.answer(answer_text)
+
+
+async def _show_time_selection_message(
+    message: Message,
+    state: FSMContext,
+    service_id: str,
+    barber_id: str,
+    date_str: str,
+):
+    await _persist_booking_state(
+        message.from_user.id,
+        state,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=date_str,
+        time=None,
+    )
+    keyboard = await _build_time_keyboard(service_id, barber_id, date_str)
+
+    if keyboard is None:
+        await _persist_booking_state(
+            message.from_user.id,
+            state,
+            next_state=UserState.waiting_for_date,
+            service_id=service_id,
+            barber_id=barber_id,
+            date=date_str,
+            time=None,
+        )
+        await message.answer(with_cancel_hint("❌ Bu kunda bo'sh vaqt yo'q."))
+        return
+
+    await _persist_booking_state(
+        message.from_user.id,
+        state,
+        next_state=UserState.waiting_for_time,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=date_str,
+        time=None,
+    )
+    await message.answer(with_cancel_hint("⏰ Vaqtni tanlang:"), reply_markup=keyboard)
+
+
+async def _render_booking_success(
+    callback: CallbackQuery,
+    *,
+    fullname: str,
+    phone: str,
+    service_name: str,
+    barber_name: str,
+    date_str: str,
+    time_str: str,
+):
+    text = (
+        "✅ <b>Buyurtmangiz muvaffaqiyatli saqlandi!</b>\n\n"
+        f"👤 <b>Ism:</b> {fullname}\n"
+        f"📱 <b>Telefon:</b> {phone}\n"
+        f"💈 <b>Xizmat:</b> {service_name}\n"
+        f"👨‍💼 <b>Usta:</b> {barber_name}\n"
+        f"📅 <b>Sana:</b> {date_str}\n"
+        f"🕔 <b>Vaqt:</b> {time_str}"
+    )
+    await _edit_callback_message_text(callback, text)
+
+
+async def _restore_temporary_order_to_state(
+    temp_order,
+    state: FSMContext,
+    entry_context: dict[str, str] | None = None,
+):
+    payload = {
+        "is_for_other": bool(temp_order.is_for_other),
+        "fullname": temp_order.fullname,
+        "phonenumber": temp_order.phonenumber,
+        "service_id": temp_order.service_id,
+        "barber_id": temp_order.barber_id,
+        "date": _date_to_iso(temp_order.date),
+        "time": _time_to_hm(temp_order.time),
+        LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked),
+    }
+    if entry_context is not None:
+        payload[PENDING_BOOKING_ENTRY_KEY] = entry_context
+
+    await state.clear()
+    await state.update_data(**payload)
+
+
+async def _complete_booking_from_temporary_order(
+    callback: CallbackQuery,
+    state: FSMContext,
+    *,
+    answer_text: str,
+) -> bool:
+    user_id = callback.from_user.id
+    temp_order = await get_temporary_order(user_id)
+    if temp_order is None:
+        await callback.answer("Yakunlanmagan booking topilmadi", show_alert=True)
+        return False
+
+    date_str = _date_to_iso(temp_order.date)
+    time_str = _time_to_hm(temp_order.time)
+    if not (
+        temp_order.service_id
+        and temp_order.barber_id
+        and date_str
+        and time_str
+        and temp_order.fullname
+        and temp_order.phonenumber
+    ):
+        return False
+
+    available_slots = await _calculate_available_slots(temp_order.service_id, temp_order.barber_id, date_str)
+    if time_str not in available_slots:
+        keyboard = await _build_time_keyboard(temp_order.service_id, temp_order.barber_id, date_str)
+        if keyboard is None:
+            await _persist_booking_state(
+                user_id,
+                state,
+                next_state=UserState.waiting_for_date,
+                is_for_other=bool(temp_order.is_for_other),
+                fullname=temp_order.fullname,
+                phonenumber=temp_order.phonenumber,
+                service_id=temp_order.service_id,
+                barber_id=temp_order.barber_id,
+                date=date_str,
+                time=None,
+                **{LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked)},
+            )
+            await _edit_callback_message_text(
+                callback,
+                with_cancel_hint("⛔ Tanlangan vaqt endi mavjud emas.\n\nIltimos, boshqa sana tanlang:"),
+                await booking_keyboards.date_keyboard(temp_order.service_id, temp_order.barber_id),
+            )
+        else:
+            await _persist_booking_state(
+                user_id,
+                state,
+                next_state=UserState.waiting_for_time,
+                is_for_other=bool(temp_order.is_for_other),
+                fullname=temp_order.fullname,
+                phonenumber=temp_order.phonenumber,
+                service_id=temp_order.service_id,
+                barber_id=temp_order.barber_id,
+                date=date_str,
+                time=None,
+                **{LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked)},
+            )
+            await _edit_callback_message_text(
+                callback,
+                with_cancel_hint("⛔ Tanlangan vaqt endi mavjud emas.\n\nIltimos, boshqa vaqt tanlang:"),
+                keyboard,
+            )
+        await callback.answer("Avval tanlangan vaqt band bo'lib qolgan", show_alert=True)
+        return False
+
+    should_send_menu_updated = False
+    existing_user = None
+    if not temp_order.is_for_other:
+        existing_user = await get_user(user_id)
+
+    if not temp_order.is_for_other:
+        saved_user = await save_user(
+            {
+                "tg_id": user_id,
+                "fullname": temp_order.fullname,
+                "phone": temp_order.phonenumber,
+            }
+        )
+        if saved_user:
+            should_send_menu_updated = existing_user is None
+
+    created = await finalize_temporary_order(user_id)
+    try:
+        await notify_barber_realtime(callback.bot, created.id, int(created.barber_id))
+    except Exception:
+        logger.exception("notify_barber_realtime failed")
+
+    await _render_booking_success(
+        callback,
+        fullname=created.fullname,
+        phone=created.phonenumber,
+        service_name=created.service_name,
+        barber_name=created.barber_id_name,
+        date_str=_date_to_iso(created.date) or date_str,
+        time_str=_time_to_hm(created.time) or time_str,
+    )
+
+    await state.clear()
+    await callback.answer(answer_text)
+    if should_send_menu_updated:
+        await callback.message.answer(
+            "📱 Menyu yangilandi:",
+            reply_markup=await get_dynamic_main_keyboard(user_id),
+        )
+    await callback.message.answer(
+        "🏠 Asosiy menyu:",
+        reply_markup=get_main_menu(),
+    )
+    return True
+
+
+async def _resume_booking_from_temporary_order(callback: CallbackQuery, state: FSMContext):
+    state_data = await state.get_data()
+    entry_context = state_data.get(PENDING_BOOKING_ENTRY_KEY)
+    temp_order = await get_temporary_order(callback.from_user.id)
+    if temp_order is None:
+        await _restart_booking_from_entry_context(callback, state, entry_context)
+        return
+
+    await _restore_temporary_order_to_state(temp_order, state, entry_context)
+
+    if is_temporary_order_complete(temp_order):
+        await _complete_booking_from_temporary_order(
+            callback,
+            state,
+            answer_text="Booking muvaffaqiyatli yakunlandi ✅",
+        )
+        return
+
+    resume_state = await _infer_resume_state(callback.from_user.id, temp_order)
+    user_id = callback.from_user.id
+
+    if resume_state == UserState.waiting_for_fullname:
+        await _persist_booking_state(user_id, state, next_state=resume_state)
+        await _ask_fullname(callback)
+        await callback.answer("Booking davom ettirildi ✅")
+        return
+
+    if resume_state == UserState.waiting_for_phonenumber:
+        await _persist_booking_state(user_id, state, next_state=resume_state)
+        await _ask_phonenumber_from_callback(callback)
+        await callback.answer("Booking davom ettirildi ✅")
+        return
+
+    if resume_state == UserState.waiting_for_service:
+        await _persist_booking_state(user_id, state, next_state=resume_state)
+        shown = await _show_service_page_callback(callback, index=0)
+        if shown:
+            await callback.answer("Booking davom ettirildi ✅")
+        else:
+            await callback.answer("Xizmatlar topilmadi", show_alert=True)
+        return
+
+    if resume_state == UserState.waiting_for_barber:
+        if not temp_order.service_id:
+            await _persist_booking_state(user_id, state, next_state=UserState.waiting_for_service)
+            shown = await _show_service_page_callback(callback, index=0)
+            if shown:
+                await callback.answer("Booking davom ettirildi ✅")
+            else:
+                await callback.answer("Xizmatlar topilmadi", show_alert=True)
+            return
+
+        await _persist_booking_state(
+            user_id,
+            state,
+            next_state=resume_state,
+            service_id=temp_order.service_id,
+        )
+        shown = await _show_barber_page_callback(callback, temp_order.service_id, index=0)
+        if shown:
+            await callback.answer("Booking davom ettirildi ✅")
+        else:
+            await callback.answer(NO_BARBER_FOR_SERVICE_TEXT, show_alert=True)
+        return
+
+    if resume_state == UserState.waiting_for_date:
+        if not temp_order.service_id or not temp_order.barber_id:
+            await _persist_booking_state(user_id, state, next_state=UserState.waiting_for_service)
+            shown = await _show_service_page_callback(callback, index=0)
+            if shown:
+                await callback.answer("Booking davom ettirildi ✅")
+            else:
+                await callback.answer("Xizmatlar topilmadi", show_alert=True)
+            return
+
+        await _go_to_date_from_callback(
+            callback,
+            state,
+            temp_order.service_id,
+            temp_order.barber_id,
+            "Booking davom ettirildi ✅",
+        )
+        return
+
+    if not temp_order.service_id or not temp_order.barber_id:
+        await _persist_booking_state(user_id, state, next_state=UserState.waiting_for_service)
+        shown = await _show_service_page_callback(callback, index=0)
+        if shown:
+            await callback.answer("Booking davom ettirildi ✅")
+        else:
+            await callback.answer("Xizmatlar topilmadi", show_alert=True)
+        return
+
+    date_str = _date_to_iso(temp_order.date)
+    if not date_str:
+        await _go_to_date_from_callback(
+            callback,
+            state,
+            temp_order.service_id,
+            temp_order.barber_id,
+            "Booking davom ettirildi ✅",
+        )
+        return
+
+    await _show_time_selection_callback(
+        callback,
+        state,
+        temp_order.service_id,
+        temp_order.barber_id,
+        date_str,
+        answer_text="Booking davom ettirildi ✅",
+    )
 
 
 async def _handle_service_selected(callback: CallbackQuery, state: FSMContext, service_id: str):
-    await state.update_data(service_id=service_id)
+    await _persist_booking_state(
+        callback.from_user.id,
+        state,
+        service_id=service_id,
+        date=None,
+        time=None,
+    )
     data = await state.get_data()
     barber_id = str(data["barber_id"]) if data.get("barber_id") is not None else None
     locked_barber = bool(data.get(LOCKED_BARBER_STATE_KEY))
@@ -706,17 +1463,30 @@ async def _handle_service_selected(callback: CallbackQuery, state: FSMContext, s
             await _show_locked_barber_unavailable_callback(callback, state)
             return
 
-        await state.update_data(barber_id=None)
+        await _persist_booking_state(
+            callback.from_user.id,
+            state,
+            next_state=UserState.waiting_for_barber,
+            barber_id=None,
+            date=None,
+            time=None,
+        )
         shown = await _show_barber_page_callback(callback, service_id, index=0)
-        await state.set_state(UserState.waiting_for_barber)
         if shown:
             await callback.answer(SELECTED_BARBER_UNAVAILABLE_TEXT, show_alert=True)
         else:
             await callback.answer(NO_BARBER_FOR_SERVICE_TEXT, show_alert=True)
         return
 
+    await _persist_booking_state(
+        callback.from_user.id,
+        state,
+        next_state=UserState.waiting_for_barber,
+        barber_id=barber_id,
+        date=None,
+        time=None,
+    )
     shown = await _show_barber_page_callback(callback, service_id, index=0)
-    await state.set_state(UserState.waiting_for_barber)
     if shown:
         await callback.answer("Xizmat tanlandi ✅")
     else:
@@ -735,9 +1505,15 @@ async def _handle_barber_selected(
         return
 
     if not await _is_barber_available_for_service(resolved_service_id, barber_id):
-        await state.update_data(barber_id=None)
+        await _persist_booking_state(
+            callback.from_user.id,
+            state,
+            next_state=UserState.waiting_for_barber,
+            barber_id=None,
+            date=None,
+            time=None,
+        )
         shown = await _show_barber_page_callback(callback, resolved_service_id, index=0)
-        await state.set_state(UserState.waiting_for_barber)
         if shown:
             await callback.answer("Tanlangan barber ushbu xizmatni ko'rsatmaydi", show_alert=True)
         else:
@@ -755,6 +1531,7 @@ async def _handle_barber_selected(
 
 @router.message(
     StateFilter(
+        UserState.waiting_for_resume_booking,
         UserState.waiting_for_booking_target,
         UserState.waiting_for_fullname,
         UserState.waiting_for_phonenumber,
@@ -774,30 +1551,25 @@ async def cancel_booking_universal(message: types.Message, state: FSMContext):
 
 
 async def start_booking(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await state.set_state(UserState.waiting_for_booking_target)
-    text = with_cancel_hint("Kim uchun navbat olmoqchisiz?")
-    markup = _booking_target_keyboard()
-    if callback.message.photo:
-        await callback.message.edit_caption(caption=text, reply_markup=markup)
-    else:
-        await callback.message.edit_text(text, reply_markup=markup)
+    if await _maybe_prompt_resume_booking(callback, state, _build_entry_context("root")):
+        return
+
+    await _show_booking_target_prompt(callback, state)
     await callback.answer()
 
 
 async def _start_booking_for_me(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await state.update_data(is_for_other=False)
-    user_id = callback.from_user.id
-    user = await get_user(user_id)
-
-    if not user:
+    initial_state = await _start_self_booking_flow(callback, state)
+    if initial_state == UserState.waiting_for_fullname:
         await _ask_fullname(callback)
-        await state.set_state(UserState.waiting_for_fullname)
         await callback.answer("Ro'yxatdan o'tishni boshlaymiz ✅")
         return
 
-    await state.set_state(UserState.waiting_for_service)
+    if initial_state == UserState.waiting_for_phonenumber:
+        await _ask_phonenumber_from_callback(callback)
+        await callback.answer("Telefon raqamingizni kiriting ✅")
+        return
+
     shown = await _show_service_page_callback(callback, index=0)
     if shown:
         await callback.answer("Navbat olish boshlandi ✅")
@@ -824,10 +1596,32 @@ async def booking_for_other_callback(callback: CallbackQuery, state: FSMContext)
         UserState.waiting_for_booking_target,
     ):
         return
-    await state.update_data(is_for_other=True)
-    await _ask_fullname(callback)
-    await state.set_state(UserState.waiting_for_fullname)
-    await callback.answer("Boshqa shaxs uchun ma'lumot kiriting ✅")
+    await _start_booking_for_other(callback, state)
+
+
+@router.callback_query(F.data == BOOKING_RESUME_CONTINUE_CB)
+async def booking_resume_continue_callback(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(
+        callback,
+        state,
+        UserState.waiting_for_resume_booking,
+    ):
+        return
+    await _resume_booking_from_temporary_order(callback, state)
+
+
+@router.callback_query(F.data == BOOKING_RESUME_RESTART_CB)
+async def booking_resume_restart_callback(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(
+        callback,
+        state,
+        UserState.waiting_for_resume_booking,
+    ):
+        return
+
+    entry_context = (await state.get_data()).get(PENDING_BOOKING_ENTRY_KEY)
+    await _delete_temporary_order_safely(callback.from_user.id)
+    await _restart_booking_from_entry_context(callback, state, entry_context)
 
 
 async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
@@ -848,25 +1642,14 @@ async def start_booking_from_barber(callback: CallbackQuery, state: FSMContext):
         await _handle_barber_selected(callback, state, str(data["service_id"]), barber_id)
         return
 
-    await state.clear()
-    await state.update_data(
-        barber_id=barber_id,
-        is_for_other=False,
-        **{LOCKED_BARBER_STATE_KEY: True},
-    )
-    has_profile = await _has_user_profile(callback.from_user.id, state)
-    if not has_profile:
-        await _ask_fullname(callback)
-        await state.set_state(UserState.waiting_for_fullname)
-        await callback.answer("Barber tanlandi, ro'yxatdan o'tamiz ✅")
+    if await _maybe_prompt_resume_booking(
+        callback,
+        state,
+        _build_entry_context("barber", barber_id=barber_id),
+    ):
         return
 
-    await state.set_state(UserState.waiting_for_service)
-    shown = await _show_service_page_callback(callback, index=0)
-    if shown:
-        await callback.answer("Barber tanlandi, xizmatni tanlang ✅")
-    else:
-        await callback.answer("Xizmatlar topilmadi", show_alert=True)
+    await _start_booking_from_barber_id(callback, state, barber_id)
 
 
 async def start_booking_from_service(callback: CallbackQuery, state: FSMContext):
@@ -880,16 +1663,14 @@ async def start_booking_from_service(callback: CallbackQuery, state: FSMContext)
         await callback.answer("Xizmat topilmadi", show_alert=True)
         return
 
-    await state.update_data(service_id=service_id)
-    has_profile = await _has_user_profile(callback.from_user.id, state)
-
-    if not has_profile:
-        await _ask_fullname(callback)
-        await state.set_state(UserState.waiting_for_fullname)
-        await callback.answer("Xizmat tanlandi, ro'yxatdan o'tamiz ✅")
+    if await _maybe_prompt_resume_booking(
+        callback,
+        state,
+        _build_entry_context("service", service_id=service_id),
+    ):
         return
 
-    await _handle_service_selected(callback, state, service_id)
+    await _start_booking_from_service_id(callback, state, service_id)
 
 
 async def process_fullname(message: Message, state: FSMContext):
@@ -903,12 +1684,16 @@ async def process_fullname(message: Message, state: FSMContext):
         )
         return
 
-    await state.update_data(fullname=fullname)
+    await _persist_booking_state(
+        message.from_user.id,
+        state,
+        next_state=UserState.waiting_for_phonenumber,
+        fullname=fullname,
+    )
     await message.answer(
         with_cancel_hint("📱 Iltimos, telefon raqamingizni kiriting yoki tugma orqali yuboring:"),
         reply_markup=phone_request_keyboard,
     )
-    await state.set_state(UserState.waiting_for_phonenumber)
 
 
 async def process_phonenumber(message: Message, state: FSMContext):
@@ -943,7 +1728,12 @@ async def process_phonenumber(message: Message, state: FSMContext):
 
     data = await state.get_data()
     fullname = data.get("fullname") or message.from_user.full_name or "Ism kiritilmagan"
-    await state.update_data(fullname=fullname, phonenumber=phonenumber)
+    await _persist_booking_state(
+        message.from_user.id,
+        state,
+        fullname=fullname,
+        phonenumber=phonenumber,
+    )
 
     await message.answer(
         "📱 Raqamingiz qabul qilindi ✅",
@@ -964,7 +1754,13 @@ async def process_phonenumber(message: Message, state: FSMContext):
             await _show_locked_barber_unavailable_message(message, state)
             return
 
-        await state.update_data(barber_id=None)
+        await _persist_booking_state(
+            message.from_user.id,
+            state,
+            barber_id=None,
+            date=None,
+            time=None,
+        )
         await message.answer(
             with_cancel_hint(
                 f"{SELECTED_BARBER_UNAVAILABLE_TEXT}\n\nIltimos, boshqa barber tanlang."
@@ -972,12 +1768,26 @@ async def process_phonenumber(message: Message, state: FSMContext):
         )
 
     if service_id:
+        await _persist_booking_state(
+            message.from_user.id,
+            state,
+            next_state=UserState.waiting_for_barber,
+            service_id=service_id,
+            barber_id=None,
+            date=None,
+            time=None,
+        )
         await _show_barber_page_message(message, service_id, index=0)
-        await state.set_state(UserState.waiting_for_barber)
         return
 
+    await _persist_booking_state(
+        message.from_user.id,
+        state,
+        next_state=UserState.waiting_for_service,
+        date=None,
+        time=None,
+    )
     await _show_service_page_message(message, index=0)
-    await state.set_state(UserState.waiting_for_service)
 
 
 async def booking_service_nav(callback: CallbackQuery, state: FSMContext):
@@ -1118,48 +1928,14 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
         return
 
     _, service_id, barber_id, date = callback.data.split("_")
-    await state.update_data(date=date)
-
-    keyboard = await _build_time_keyboard(service_id, barber_id, date)
-
-    if keyboard is None:
-        back_markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🔙 Orqaga",
-                        callback_data=f"back_date_{service_id}_{barber_id}",
-                    )
-                ]
-            ]
-        )
-
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=with_cancel_hint("❌ Kechirasiz, bu kunga barcha vaqtlar band."),
-                reply_markup=back_markup,
-            )
-        else:
-            await callback.message.edit_text(
-                with_cancel_hint("❌ Kechirasiz, bu kunga barcha vaqtlar band."),
-                reply_markup=back_markup,
-            )
-    else:
-        if callback.message.photo:
-            await callback.message.edit_caption(
-                caption=with_cancel_hint("⏰ Vaqt tanlang:"),
-                reply_markup=keyboard,
-            )
-        else:
-            await callback.message.edit_text(
-                with_cancel_hint("⏰ Vaqt tanlang:"),
-                reply_markup=keyboard,
-            )
-
-    await state.set_state(
-        UserState.waiting_for_date if keyboard is None else UserState.waiting_for_time
+    await _show_time_selection_callback(
+        callback,
+        state,
+        service_id,
+        barber_id,
+        date,
+        answer_text="Sana qabul qilindi ✅",
     )
-    await callback.answer("Sana qabul qilindi ✅")
 
 
 @router.message(UserState.waiting_for_date)
@@ -1172,21 +1948,21 @@ async def book_step3_message(message: Message, state: FSMContext):
         )
         return
 
-    await state.update_data(date=date)
-
     data = await state.get_data()
-    keyboard = await _build_time_keyboard(
-        data["service_id"],
-        data["barber_id"],
-        date,
-    )
-
-    if keyboard is None:
-        await message.answer(with_cancel_hint("❌ Bu kunda bo'sh vaqt yo'q."))
+    service_id = data.get("service_id")
+    barber_id = data.get("barber_id")
+    if not service_id or not barber_id:
+        await _persist_booking_state(
+            message.from_user.id,
+            state,
+            next_state=UserState.waiting_for_service,
+            date=None,
+            time=None,
+        )
+        await _show_service_page_message(message, index=0)
         return
 
-    await message.answer(with_cancel_hint("⏰ Vaqtni tanlang:"), reply_markup=keyboard)
-    await state.set_state(UserState.waiting_for_time)
+    await _show_time_selection_message(message, state, str(service_id), str(barber_id), date)
 
 
 async def back_to_date(callback: CallbackQuery, state: FSMContext):
@@ -1211,7 +1987,15 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
             reply_markup=await booking_keyboards.date_keyboard(service_id, barber_id),
         )
 
-    await state.set_state(UserState.waiting_for_date)
+    await _persist_booking_state(
+        callback.from_user.id,
+        state,
+        next_state=UserState.waiting_for_date,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=None,
+        time=None,
+    )
     await callback.answer("🔙 Orqaga qaytildi")
 
 
@@ -1247,76 +2031,32 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     is_for_other = bool(user_data.get("is_for_other"))
     fullname = user_data.get("fullname")
     phone = user_data.get("phonenumber")
-    existing_user = None
 
     if not is_for_other:
         existing_user = await get_user(user_id)
-
-    if (not fullname or not phone) and not is_for_other:
         if existing_user:
             fullname = fullname or existing_user.fullname
             phone = phone or existing_user.phone
 
     fullname = fullname or "Noma'lum"
     phone = phone or "Noma'lum"
-    should_send_menu_updated = False
 
-    if not is_for_other and fullname != "Noma'lum" and phone != "Noma'lum":
-        saved_user = await save_user(
-            {
-                "tg_id": user_id,
-                "fullname": fullname,
-                "phone": phone,
-            }
-        )
-        if saved_user:
-            fullname = saved_user.fullname or fullname
-            phone = saved_user.phone or phone
-            should_send_menu_updated = existing_user is None
-
-    service_name = await _resolve_service_name(service_id)
-    barber_name = await _resolve_barber_name(barber_id)
-
-    order = {
-        "user_id": user_id,
-        "fullname": fullname,
-        "phonenumber": phone,
-        "service_id": service_id,
-        "barber_id": barber_id,
-        "barber_id_name": barber_name,
-        "date": date_str,
-        "time": time_str,
-    }
-
-    created = await save_order(order)
-    try:
-        await notify_barber_realtime(callback.bot, created.id, int(barber_id))
-    except Exception:
-        logger.exception("notify_barber_realtime failed")
-
-    text = (
-        "✅ <b>Buyurtmangiz muvaffaqiyatli saqlandi!</b>\n\n"
-        f"👤 <b>Ism:</b> {fullname}\n"
-        f"📱 <b>Telefon:</b> {phone}\n"
-        f"💈 <b>Xizmat:</b> {service_name}\n"
-        f"👨‍💼 <b>Usta:</b> {barber_name}\n"
-        f"📅 <b>Sana:</b> {date_str}\n"
-        f"🕔 <b>Vaqt:</b> {time_str}"
+    await _persist_booking_state(
+        user_id,
+        state,
+        next_state=UserState.waiting_for_time,
+        is_for_other=is_for_other,
+        fullname=fullname,
+        phonenumber=phone,
+        service_id=service_id,
+        barber_id=barber_id,
+        date=date_str,
+        time=time_str,
+        **{LOCKED_BARBER_STATE_KEY: bool(user_data.get(LOCKED_BARBER_STATE_KEY))},
     )
 
-    if callback.message.photo:
-        await callback.message.edit_caption(caption=text, parse_mode="HTML")
-    else:
-        await callback.message.edit_text(text, parse_mode="HTML")
-
-    await state.clear()
-    await callback.answer("Vaqt tanlandi ✅")
-    if should_send_menu_updated:
-        await callback.message.answer(
-            "📱 Menyu yangilandi:",
-            reply_markup=await get_dynamic_main_keyboard(user_id),
-        )
-    await callback.message.answer(
-        "🏠 Asosiy menyu:",
-        reply_markup=get_main_menu(),
+    await _complete_booking_from_temporary_order(
+        callback,
+        state,
+        answer_text="Vaqt tanlandi ✅",
     )

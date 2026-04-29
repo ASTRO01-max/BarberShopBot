@@ -124,11 +124,11 @@ async def show_user_database_actions(message: Message, state: FSMContext):
 
     await message.answer(
         "📄 Foydalanuvchi ma'lumotlari:\n\n"
-        f"🆔 Telegram ID: {user_tg_id}\n"
+        f"🆔 Telegram ID:  <code>{user_tg_id}</code>\n"
         f"👤 To'liq ism: {fullname}\n"
         f"📞 Telefon: {phone}\n\n"
         "Quyidagi amallardan birini tanlang:",
-        reply_markup=get_user_database_inline_keyboard(),
+        reply_markup=get_user_database_inline_keyboard(), parse_mode="HTML"
     )
 
     # await message.answer(
