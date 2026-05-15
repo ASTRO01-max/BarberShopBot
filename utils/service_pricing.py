@@ -23,6 +23,12 @@ def format_price(price: int | None) -> str:
     return f"{normalized_price:,}".replace(",", " ")
 
 
+def format_duration_minutes(duration_minutes: int | None) -> str:
+    if not duration_minutes:
+        return "-"
+    return f"{int(duration_minutes)} daqiqa"
+
+
 def attach_service_discount_snapshot(
     service: object,
     *,

@@ -1,4 +1,4 @@
-# admins/servie_profile.py
+# admins/service_profile.py
 from html import escape
 
 from aiogram import F, Router, types
@@ -9,21 +9,16 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sql.db_services import (
     get_service_by_id,
     list_services_ordered,
-    normalize_service_price,
     service_name_exists,
     update_service,
 )
 from sql.models import Services
-from utils.discounts import format_discount_percent
 from utils.get_file_id import get_photo_file_id
-from utils.service_pricing import get_service_price_snapshot
 from utils.states import AdminServiceProfileStates
-from utils.validators import INT32_MAX
-from .admin_buttons import ADMIN_SERVICE_PROFILE_MENU_CB, ADMIN_MAIN_MENU_BACK_CB
+from .admin_buttons import ADMIN_MAIN_MENU_BACK_CB, ADMIN_SERVICE_PROFILE_MENU_CB
 from .service_admin_common import (
     ensure_admin_callback,
     ensure_admin_message,
-    format_price,
     render_empty_services_text,
     render_service_text,
     show_admin_main_menu,
@@ -44,8 +39,6 @@ SERVICE_PROFILE_BACK_TO_PROFILE_PREFIX = "admin_service_profile_back_to_profile"
 
 SERVICE_PROFILE_FIELDS = {
     "name": "Xizmat nomi",
-    "price": "Xizmat narxi",
-    "duration": "Xizmat davomiyligi",
 }
 
 
@@ -68,12 +61,7 @@ def _service_profile_list_keyboard(index: int, service_id: int) -> InlineKeyboar
                     callback_data=f"{SERVICE_PROFILE_OPEN_PREFIX}:{service_id}:{index}",
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    text="🔙 Orqaga",
-                    callback_data=ADMIN_MAIN_MENU_BACK_CB,
-                )
-            ],
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data=ADMIN_MAIN_MENU_BACK_CB)],
         ]
     )
 
@@ -89,7 +77,7 @@ def _service_profile_keyboard(service_id: int, index: int) -> InlineKeyboardMark
             ],
             [
                 InlineKeyboardButton(
-                    text="✏️ Ma'lumotlarni o'zgartirish",
+                    text="✏️ Xizmat nomini o'zgartirish",
                     callback_data=f"{SERVICE_PROFILE_EDIT_MENU_PREFIX}:{service_id}:{index}",
                 )
             ],
@@ -110,18 +98,6 @@ def _service_profile_fields_keyboard(service_id: int, index: int) -> InlineKeybo
                 InlineKeyboardButton(
                     text="✏️ Xizmat nomi",
                     callback_data=f"{SERVICE_PROFILE_FIELD_PREFIX}:name:{service_id}:{index}",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="💵 Xizmat narxi",
-                    callback_data=f"{SERVICE_PROFILE_FIELD_PREFIX}:price:{service_id}:{index}",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🕒 Xizmat davomiyligi",
-                    callback_data=f"{SERVICE_PROFILE_FIELD_PREFIX}:duration:{service_id}:{index}",
                 )
             ],
             [
@@ -166,16 +142,12 @@ def _service_list_text(service: Services, index: int, total: int, notice: str | 
 
 
 def _service_profile_text(service: Services, index: int, total: int, notice: str | None = None) -> str:
-    photo_status = "mavjud" if getattr(service, "photo", None) else "yo'q"
     text = render_service_text(
         service,
         title=SERVICE_PROFILE_TITLE,
         index=index,
         total=total,
-        extra_lines=(
-            f"🆔 <b>ID:</b> <code>{service.id}</code>",
-            f"🖼 <b>Rasm:</b> {photo_status}",
-        ),
+        extra_lines=(f"🆔 <b>ID:</b> <code>{service.id}</code>",),
     )
     if notice:
         text = f"{notice}\n\n{text}"
@@ -184,32 +156,12 @@ def _service_profile_text(service: Services, index: int, total: int, notice: str
 
 def _build_field_prompt(service: Services, field_key: str) -> str:
     label = SERVICE_PROFILE_FIELDS[field_key]
-
-    if field_key == "name":
-        current_value = escape((service.name or "").strip() or "Kiritilmagan")
-        hint = "Yangi xizmat nomini yuboring."
-        example = "Masalan: <code>Soqol olish</code>"
-    elif field_key == "price":
-        snapshot = get_service_price_snapshot(service)
-        current_value = f"{format_price(snapshot.base_price)} so'm"
-        hint = "Yangi narxni faqat raqam ko'rinishida yuboring."
-        if snapshot.has_discount:
-            percent_text = format_discount_percent(snapshot.discount_percent)
-            hint += (
-                f"\nAmaldagi chegirma: <b>{percent_text}%</b>"
-                f" ({format_price(snapshot.current_price)} so'm)."
-                " Narx o'zgarsa, chegirmali narx ham avtomatik qayta hisoblanadi."
-            )
-        example = f"Maksimal qiymat: <code>{INT32_MAX}</code>"
-    else:
-        current_value = escape(str(service.duration or "Kiritilmagan"))
-        hint = "Yangi davomiylik matnini yuboring."
-        example = "Masalan: <code>45 daqiqa</code>"
-
+    current_value = escape((service.name or "").strip() or "Kiritilmagan")
     return with_cancel_hint(
         f"<b>{escape(label)}</b>\n\n"
         f"Joriy qiymat: <b>{current_value}</b>\n\n"
-        f"{hint}\n{example}"
+        "Yangi xizmat nomini yuboring.\n"
+        "Masalan: <code>Soqol olish</code>"
     )
 
 
@@ -235,12 +187,7 @@ async def _show_service_profile_list(
             text=text,
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="🔙 Orqaga",
-                            callback_data=ADMIN_MAIN_MENU_BACK_CB,
-                        )
-                    ]
+                    [InlineKeyboardButton(text="🔙 Orqaga", callback_data=ADMIN_MAIN_MENU_BACK_CB)]
                 ]
             ),
         )
@@ -284,12 +231,7 @@ async def _show_service_profile(
             text=text,
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="🔙 Orqaga",
-                            callback_data=ADMIN_MAIN_MENU_BACK_CB,
-                        )
-                    ]
+                    [InlineKeyboardButton(text="🔙 Orqaga", callback_data=ADMIN_MAIN_MENU_BACK_CB)]
                 ]
             ),
         )
@@ -300,12 +242,7 @@ async def _show_service_profile(
         chat_id=chat_id,
         message_id=message_id,
         service=service,
-        text=_service_profile_text(
-            service,
-            normalized_index,
-            len(services),
-            notice,
-        ),
+        text=_service_profile_text(service, normalized_index, len(services), notice),
         reply_markup=reply_markup or _service_profile_keyboard(int(service.id), normalized_index),
     )
     return shown_message_id, normalized_index, service
@@ -315,16 +252,13 @@ def _parse_nav_callback(data: str) -> tuple[str, int] | None:
     parts = data.split(":")
     if len(parts) != 3:
         return None
-
     action = parts[1]
     if action not in {"prev", "next"}:
         return None
-
     try:
         index = int(parts[2])
     except ValueError:
         return None
-
     return action, index
 
 
@@ -332,13 +266,11 @@ def _parse_service_and_index(data: str) -> tuple[int, int] | None:
     parts = data.split(":")
     if len(parts) != 3:
         return None
-
     try:
         service_id = int(parts[1])
         index = int(parts[2])
     except ValueError:
         return None
-
     return service_id, index
 
 
@@ -346,17 +278,14 @@ def _parse_field_callback(data: str) -> tuple[str, int, int] | None:
     parts = data.split(":")
     if len(parts) != 4:
         return None
-
     field_key = parts[1]
     if field_key not in SERVICE_PROFILE_FIELDS:
         return None
-
     try:
         service_id = int(parts[2])
         index = int(parts[3])
     except ValueError:
         return None
-
     return field_key, service_id, index
 
 
@@ -408,11 +337,7 @@ async def navigate_service_profile_pages(callback: types.CallbackQuery, state: F
         await callback.answer("Xizmatlar topilmadi.", show_alert=True)
         return
 
-    if action == "next":
-        index = (index + 1) % len(services)
-    else:
-        index = (index - 1) % len(services)
-
+    index = (index + 1) % len(services) if action == "next" else (index - 1) % len(services)
     shown_message_id, page_index, service_id = await _show_service_profile_list(
         bot=callback.bot,
         chat_id=callback.message.chat.id,
@@ -730,48 +655,25 @@ async def save_service_profile_field(message: types.Message, state: FSMContext) 
         await message.answer("❌ Jarayon buzildi. Qayta urinib ko'ring.")
         return
 
-    updates: dict[str, object] = {}
-    error_text: str | None = None
-
-    if field_key == "name":
-        if await service_name_exists(raw_text, exclude_service_id=int(service_id)):
-            error_text = "Bunday xizmat nomi allaqachon mavjud."
-        else:
-            updates["name"] = raw_text
-    elif field_key == "price":
-        normalized_price = normalize_service_price(raw_text)
-        if normalized_price is None:
-            error_text = (
-                "Narx faqat raqam bo'lishi kerak va ruxsat etilgan "
-                f"maksimal qiymat {INT32_MAX} dan oshmasligi kerak."
-            )
-        else:
-            updates["price"] = normalized_price
-    elif field_key == "duration":
-        updates["duration"] = raw_text
-    else:
-        error_text = "Maydon topilmadi."
-
-    if error_text:
+    if await service_name_exists(raw_text, exclude_service_id=int(service_id)):
         await message.answer(
-            with_cancel_hint(f"❌ {error_text}"),
+            with_cancel_hint("❌ Bunday xizmat nomi allaqachon mavjud."),
             parse_mode="HTML",
         )
         return
 
-    updated_service = await update_service(int(service_id), updates)
+    updated_service = await update_service(int(service_id), {"name": raw_text})
     if updated_service is None:
         await state.clear()
         await message.answer("❌ Xizmatni yangilab bo'lmadi. Qayta urinib ko'ring.")
         return
 
-    field_label = SERVICE_PROFILE_FIELDS[field_key]
     await _show_service_profile(
         bot=message.bot,
         chat_id=message.chat.id,
         message_id=profile_message_id,
         service_id=int(updated_service.id),
         index=service_index,
-        notice=f"✅ {escape(field_label)} yangilandi.",
+        notice="✅ Xizmat nomi yangilandi.",
     )
     await state.clear()

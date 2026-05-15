@@ -18,8 +18,6 @@ class AdminStates(StatesGroup):
     adding_admin_fullname = State()
     adding_admin_phone = State()
     adding_service = State()
-    adding_service_price = State()
-    adding_service_duration = State()
     adding_service_photo = State()
     adding_barber = State()
     adding_barber_photo = State()

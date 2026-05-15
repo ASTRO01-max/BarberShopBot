@@ -7,10 +7,10 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy import func, select
 
 from sql.db import async_session
+from sql.db_services import create_service
 from sql.models import Services
 from utils.emoji_map import SERVICE_EMOJIS
 from utils.states import AdminStates
-from utils.validators import INT32_MAX
 from .admin_buttons import (
     SERVICE_ADD_CB,
     SERVICE_ADD_TEXT,
@@ -112,13 +112,11 @@ def _render_service_summary(service: Services) -> str:
     service_name = (service.name or "").strip() or "Noma'lum xizmat"
     emoji = SERVICE_EMOJIS.get(service_name, "🔹")
     safe_name = escape(service_name)
-    safe_duration = escape(str(service.duration or "-"))
-    price_text = str(service.price if service.price is not None else "-")
+    photo_status = "mavjud" if getattr(service, "photo", None) else "yo'q"
 
     return (
         f"{emoji} <b>{safe_name}</b>\n"
-        f"💵 <b>Narx:</b> {price_text} so'm\n"
-        f"🕒 <b>Davomiyligi:</b> {safe_duration}"
+        f"🖼 <b>Rasm:</b> {photo_status}"
     )
 
 
@@ -140,7 +138,8 @@ def _render_service_page_text(total: int, index: int, service: Services | None) 
 def _render_delete_confirmation_text(total: int, index: int, service: Services) -> str:
     return (
         "🗑 <b>Xizmatni o'chirish</b>\n\n"
-        "Quyidagi xizmatni o'chirishni tasdiqlaysizmi?\n\n"
+        "Quyidagi xizmatni o'chirishni tasdiqlaysizmi?\n"
+        "Bu xizmatga ulangan barber-service yozuvlari ham CASCADE orqali o'chadi.\n\n"
         f"{_render_service_summary(service)}\n\n"
         f"📌 <i>({index + 1} / {total})</i>"
     )
@@ -208,6 +207,18 @@ async def _start_add_service(message: types.Message | None, state: FSMContext) -
     await message.answer(with_cancel_hint("📝 Yangi xizmat nomini kiriting:"))
 
 
+async def _save_service_from_state(
+    state: FSMContext,
+    *,
+    photo: str | None,
+) -> Services | None:
+    data = await state.get_data()
+    service_name = (data.get("service_name") or "").strip()
+    if not service_name:
+        return None
+    return await create_service({"name": service_name, "photo": photo})
+
+
 @router.callback_query(F.data.startswith(f"{SERVICE_NAV_PREFIX}_"))
 async def service_pagination_nav(callback: types.CallbackQuery):
     parts = (callback.data or "").split("_")
@@ -228,10 +239,7 @@ async def service_pagination_nav(callback: types.CallbackQuery):
 
     total = await _count_services()
     if total > 0:
-        if action == "next":
-            index = (index + 1) % total
-        else:
-            index = (index - 1) % total
+        index = (index + 1) % total if action == "next" else (index - 1) % total
     else:
         index = 0
 
@@ -284,7 +292,7 @@ async def ask_service_delete_confirmation(callback: types.CallbackQuery, state: 
     await _edit_or_send_service_message(
         callback,
         text=_render_delete_confirmation_text(total, index, service),
-        reply_markup=_service_delete_confirmation_keyboard(service.id, index),
+        reply_markup=_service_delete_confirmation_keyboard(int(service.id), index),
     )
     await callback.answer()
 
@@ -339,12 +347,7 @@ async def confirm_service_delete(callback: types.CallbackQuery):
 
 
 @router.message(
-    StateFilter(
-        AdminStates.adding_service,
-        AdminStates.adding_service_price,
-        AdminStates.adding_service_duration,
-        AdminStates.adding_service_photo,
-    ),
+    StateFilter(AdminStates.adding_service, AdminStates.adding_service_photo),
     Command("cancel"),
 )
 async def cancel_add_service(message: types.Message, state: FSMContext):
@@ -373,46 +376,7 @@ async def save_service_name(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(service_name=service_name)
-    await state.set_state(AdminStates.adding_service_price)
-    await message.answer(with_cancel_hint("💵 Xizmat narxini kiriting (so'mda, faqat raqam):"))
-
-
-@router.message(StateFilter(AdminStates.adding_service_price))
-async def save_service_price(message: types.Message, state: FSMContext):
-    text = (message.text or "").strip()
-    if not text.isdigit():
-        await message.answer(
-            with_cancel_hint("❌ Narx faqat raqam bo'lishi kerak. Qayta kiriting:")
-        )
-        return
-
-    price = int(text)
-    if price > INT32_MAX:
-        await message.answer(
-            with_cancel_hint(
-                f"❌ Narx juda katta. Maksimal qiymat: {INT32_MAX}. Qayta kiriting:"
-            )
-        )
-        return
-
-    await state.update_data(price=price)
-    await state.set_state(AdminStates.adding_service_duration)
-    await message.answer(
-        with_cancel_hint("🕒 Xizmat davomiyligini kiriting (masalan: 30 daqiqa):")
-    )
-
-
-@router.message(StateFilter(AdminStates.adding_service_duration))
-async def save_service_duration(message: types.Message, state: FSMContext):
-    duration = (message.text or "").strip()
-    if not duration:
-        await message.answer(
-            with_cancel_hint("❌ Davomiylik bo'sh bo'lmasligi kerak. Qayta kiriting:")
-        )
-        return
-
-    await state.update_data(duration=duration)
-
+    await state.set_state(AdminStates.adding_service_photo)
     markup = types.InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -427,8 +391,6 @@ async def save_service_duration(message: types.Message, state: FSMContext):
             ]
         ]
     )
-
-    await state.set_state(AdminStates.adding_service_photo)
     await message.answer(
         with_cancel_hint("Xizmat uchun rasm qo'shasizmi?"),
         reply_markup=markup,
@@ -440,29 +402,18 @@ async def save_service_duration(message: types.Message, state: FSMContext):
     StateFilter(AdminStates.adding_service_photo),
 )
 async def save_service_without_photo(call: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-
-    async with async_session() as session:
-        new_service = Services(
-            name=data["service_name"],
-            price=data["price"],
-            duration=data["duration"],
-            photo=None,
-        )
-        session.add(new_service)
-        await session.commit()
-
-    emoji = SERVICE_EMOJIS.get(data["service_name"], "🔹")
-
+    service = await _save_service_from_state(state, photo=None)
     if call.message:
-        await call.message.answer(
-            "✅ <b>Yangi xizmat qo'shildi!</b>\n\n"
-            f"{emoji} <b>{escape(data['service_name'])}</b>\n"
-            f"💵 Narxi: <b>{data['price']}</b> so'm\n"
-            f"🕒 Davomiyligi: <b>{escape(data['duration'])}</b>\n"
-            "📸 Rasm: <i>Yo'q</i>",
-            parse_mode="HTML",
-        )
+        if service is None:
+            await call.message.answer("❌ Xizmat ma'lumotlari topilmadi. Qayta boshlang.")
+        else:
+            emoji = SERVICE_EMOJIS.get(service.name, "🔹")
+            await call.message.answer(
+                "✅ <b>Yangi xizmat qo'shildi!</b>\n\n"
+                f"{emoji} <b>{escape(service.name)}</b>\n"
+                "🖼 Rasm: <i>Yo'q</i>",
+                parse_mode="HTML",
+            )
 
     await state.clear()
     await call.answer()
@@ -474,7 +425,6 @@ async def save_service_without_photo(call: types.CallbackQuery, state: FSMContex
 )
 async def ask_service_photo(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await state.set_state(AdminStates.adding_service_photo)
     if call.message:
         await call.message.answer(with_cancel_hint("📸 Iltimos, xizmat rasmini yuboring."))
 
@@ -482,33 +432,19 @@ async def ask_service_photo(call: types.CallbackQuery, state: FSMContext):
 @router.message(StateFilter(AdminStates.adding_service_photo), F.photo)
 async def add_service_photo(message: types.Message, state: FSMContext):
     photo_file_id = message.photo[-1].file_id
-    data = await state.get_data()
-
-    if not data.get("service_name") or not data.get("price") or not data.get("duration"):
+    service = await _save_service_from_state(state, photo=photo_file_id)
+    if service is None:
         await message.answer(
             with_cancel_hint("❌ Xizmat ma'lumotlari topilmadi. Qayta boshlang.")
         )
         await state.clear()
         return
 
-    async with async_session() as session:
-        new_service = Services(
-            name=data["service_name"],
-            price=data["price"],
-            duration=data["duration"],
-            photo=photo_file_id,
-        )
-        session.add(new_service)
-        await session.commit()
-
-    emoji = SERVICE_EMOJIS.get(data["service_name"], "🔹")
-
+    emoji = SERVICE_EMOJIS.get(service.name, "🔹")
     await message.answer(
         "✅ <b>Xizmat rasm bilan saqlandi!</b>\n\n"
-        f"{emoji} <b>{escape(data['service_name'])}</b>\n"
-        f"💵 Narxi: <b>{data['price']}</b> so'm\n"
-        f"🕒 Davomiyligi: <b>{escape(data['duration'])}</b>\n"
-        "📸 Rasm: <i>mavjud</i>",
+        f"{emoji} <b>{escape(service.name)}</b>\n"
+        "🖼 Rasm: <i>mavjud</i>",
         parse_mode="HTML",
     )
 

@@ -20,19 +20,25 @@ from keyboards.main_menu import get_main_menu
 from handlers.barber_cards import barber_full_name, get_barber_card_content
 from sql.db import async_session
 from sql.db_services import list_services_ordered
-from sql.db_barbers_expanded import get_barbers_by_service
+from sql.db_barber_services import (
+    get_barber_service_by_pair,
+    get_barber_services_by_service,
+)
 from sql.db_temporary_orders import (
     delete_temporary_order,
     finalize_temporary_order,
+    get_missing_temporary_order_fields,
     get_temporary_order,
     is_temporary_order_complete,
+    TemporaryOrderIncompleteError,
+    TemporaryOrderNotFoundError,
     upsert_temporary_order,
 )
 from sql.db_users_utils import get_user, save_user
 from sql.models import Barbers, OrdinaryUser, Services, Order
 from superadmins.order_realtime_notify import notify_barber_realtime
 from utils.emoji_map import SERVICE_EMOJIS
-from utils.service_pricing import build_service_price_lines
+from utils.service_pricing import build_service_price_lines, format_duration_minutes
 from utils.states import UserState
 from utils.validators import parse_user_date
 
@@ -41,7 +47,10 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 CANCEL_HINT = "\n\n↩️ Bekor qilish uchun /cancel yuboring."
-BOOKING_CANCELLED_TEXT = "🚫 Navbat olish jarayoni bekor qilindi.\n\n🏠 Asosiy menyuga qaytdingiz."
+BOOKING_PAUSED_TEXT = (
+    "⏸️ Navbat olish vaqtincha to'xtatildi.\n\n"
+    "Keyin davom ettirishingiz mumkin."
+)
 BOOKING_FOR_ME_CB = "booking_for_me"
 BOOKING_FOR_OTHER_CB = "booking_for_other"
 BOOKING_RESUME_CONTINUE_CB = "booking_resume_continue"
@@ -161,6 +170,15 @@ async def _persist_booking_state(
             "phonenumber": data.get("phonenumber"),
             "service_id": str(data["service_id"]) if data.get("service_id") is not None else None,
             "barber_id": str(data["barber_id"]) if data.get("barber_id") is not None else None,
+            "barber_service_id": (
+                int(data["barber_service_id"])
+                if data.get("barber_service_id") is not None
+                else None
+            ),
+            "service_name": data.get("service_name"),
+            "barber_name": data.get("barber_name"),
+            "booked_price": data.get("booked_price"),
+            "booked_duration_minutes": data.get("booked_duration_minutes"),
             "date": data.get("date"),
             "time": data.get("time"),
         }
@@ -226,6 +244,7 @@ async def _maybe_prompt_resume_booking(
 
 def _booking_state_from_value(state_value: str | None) -> State | None:
     state_map = {
+        UserState.waiting_for_booking_target.state: UserState.waiting_for_booking_target,
         UserState.waiting_for_fullname.state: UserState.waiting_for_fullname,
         UserState.waiting_for_phonenumber.state: UserState.waiting_for_phonenumber,
         UserState.waiting_for_service.state: UserState.waiting_for_service,
@@ -271,10 +290,34 @@ async def _ensure_callback_state(
 
 
 async def _finish_booking_cancel(message: Message, state: FSMContext):
-    await _delete_temporary_order_safely(message.from_user.id)
+    user_id = message.from_user.id
+    current_state = await state.get_state()
+    if current_state is None:
+        temp_order = await get_temporary_order(user_id)
+        logger.info(
+            "Booking pause requested with empty FSM user_id=%s stored_state=%s",
+            user_id,
+            getattr(temp_order, "current_state", None),
+        )
+    else:
+        try:
+            await upsert_temporary_order(
+                {
+                    "user_id": user_id,
+                    "current_state": current_state,
+                }
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist booking pause state=%s user_id=%s",
+                current_state,
+                user_id,
+            )
+
     await state.clear()
+    logger.info("Booking paused at state=%s user_id=%s", current_state, user_id)
     await message.answer(
-        BOOKING_CANCELLED_TEXT,
+        BOOKING_PAUSED_TEXT,
         reply_markup=get_main_menu(),
     )
 
@@ -440,49 +483,36 @@ async def _calculate_available_slots(
     if target_date is None:
         return []
 
-    try:
-        service_db_id = int(service_id)
-        barber_db_id = int(barber_id)
-    except (TypeError, ValueError):
-        return []
-
     local_now = datetime.now().astimezone()
     tzinfo = local_now.tzinfo
 
     async with async_session() as session:
-        service = await session.get(Services, service_db_id)
+        try:
+            service_db_id = int(service_id)
+            barber_db_id = int(barber_id)
+        except (TypeError, ValueError):
+            return []
+
         barber = await session.get(Barbers, barber_db_id)
-        if not service or not barber or barber.is_paused:
+        if not barber or barber.is_paused:
+            return []
+
+        barber_service = await get_barber_service_by_pair(barber_db_id, service_db_id)
+        if barber_service is None:
             return []
 
         work_bounds = _parse_work_time_bounds(barber.work_time)
-        service_duration = _parse_duration_minutes(service.duration)
+        service_duration = int(barber_service.duration_minutes or 0)
         if not work_bounds or not service_duration:
             return []
 
         orders_result = await session.execute(
-            select(Order.time, Order.service_id).where(
-                Order.barber_id == str(barber_id),
+            select(Order.time, Order.booked_duration_minutes).where(
+                Order.barber_id == barber_db_id,
                 Order.date == target_date,
             )
         )
         booked_rows = orders_result.all()
-
-        booked_service_ids = {
-            int(order_service_id)
-            for _, order_service_id in booked_rows
-            if str(order_service_id).isdigit()
-        }
-
-        duration_by_service_id: dict[str, int] = {}
-        if booked_service_ids:
-            durations_result = await session.execute(
-                select(Services.id, Services.duration).where(Services.id.in_(booked_service_ids))
-            )
-            for booked_service_id, booked_duration in durations_result.all():
-                parsed = _parse_duration_minutes(booked_duration)
-                if parsed:
-                    duration_by_service_id[str(booked_service_id)] = parsed
 
     start_time, end_time = work_bounds
     work_start = _combine_local_datetime(target_date, start_time, tzinfo)
@@ -493,13 +523,16 @@ async def _calculate_available_slots(
         return []
 
     busy_intervals: list[tuple[datetime, datetime]] = []
-    for booked_time_raw, booked_service_id_raw in booked_rows:
+    for booked_time_raw, booked_duration_raw in booked_rows:
         booked_time = _normalize_time_value(booked_time_raw)
         if booked_time is None:
             continue
 
-        booked_duration = duration_by_service_id.get(str(booked_service_id_raw))
-        if booked_duration is None:
+        try:
+            booked_duration = int(booked_duration_raw or 0)
+        except (TypeError, ValueError):
+            booked_duration = 0
+        if booked_duration <= 0:
             booked_duration = service_duration or DEFAULT_EXISTING_ORDER_DURATION_MINUTES
 
         busy_start = _combine_local_datetime(target_date, booked_time, tzinfo)
@@ -616,31 +649,28 @@ async def _fetch_services():
     return await list_services_ordered()
 
 
-async def _fetch_active_barbers_by_service(service_id: str):
+async def _fetch_active_barber_services_by_service(service_id: str):
     try:
         normalized_service_id = int(str(service_id))
     except (TypeError, ValueError):
         return []
 
-    barber_ids = await get_barbers_by_service(normalized_service_id)
-    if not barber_ids:
-        return []
+    return await get_barber_services_by_service(normalized_service_id)
 
-    async with async_session() as session:
-        result = await session.execute(
-            select(Barbers)
-            .where(
-                Barbers.id.in_(barber_ids),
-                or_(Barbers.is_paused.is_(False), Barbers.is_paused.is_(None)),
-            )
-            .order_by(Barbers.id.asc())
-        )
-        return result.scalars().all()
+
+async def _fetch_active_barbers_by_service(service_id: str):
+    return [
+        item.barber
+        for item in await _fetch_active_barber_services_by_service(service_id)
+        if item.barber is not None
+    ]
 
 
 async def _is_barber_available_for_service(service_id: str, barber_id: str) -> bool:
-    barbers = await _fetch_active_barbers_by_service(service_id)
-    return any(str(barber.id) == str(barber_id) for barber in barbers)
+    item = await get_barber_service_by_pair(barber_id, service_id)
+    if item is None or item.barber is None:
+        return False
+    return not bool(getattr(item.barber, "is_paused", False))
 
 
 async def _resolve_service_id(raw_value: str | None) -> str | None:
@@ -755,12 +785,10 @@ async def _show_service_page_callback(callback: CallbackQuery, index: int = 0) -
     index = index % len(services)
     service = services[index]
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
-    price_lines = "\n".join(build_service_price_lines(service))
     caption = with_cancel_hint(
         f"💈 <b>Xizmatni tanlang</b>\n\n"
         f"{emoji} <b>{service.name}</b>\n"
-        f"{price_lines}\n"
-        f"🕒 <b>Davomiyligi:</b> {service.duration}\n\n"
+        f"Narx va davomiylik barber tanlanganda ko'rsatiladi.\n\n"
         f"📌 <i>({index + 1} / {len(services)})</i>"
     )
     await _render_catalog_callback(
@@ -781,12 +809,10 @@ async def _show_service_page_message(message: Message, index: int = 0) -> bool:
     index = index % len(services)
     service = services[index]
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
-    price_lines = "\n".join(build_service_price_lines(service))
     caption = with_cancel_hint(
         f"💈 <b>Xizmatni tanlang</b>\n\n"
         f"{emoji} <b>{service.name}</b>\n"
-        f"{price_lines}\n"
-        f"🕒 <b>Davomiyligi:</b> {service.duration}\n\n"
+        f"Narx va davomiylik barber tanlanganda ko'rsatiladi.\n\n"
         f"📌 <i>({index + 1} / {len(services)})</i>"
     )
     await _send_catalog_message(
@@ -799,8 +825,8 @@ async def _show_service_page_message(message: Message, index: int = 0) -> bool:
 
 
 async def _show_barber_page_callback(callback: CallbackQuery, service_id: str, index: int = 0) -> bool:
-    barbers = await _fetch_active_barbers_by_service(service_id)
-    if not barbers:
+    offerings = await _fetch_active_barber_services_by_service(service_id)
+    if not offerings:
         await _render_catalog_callback(
             callback,
             with_cancel_hint(f"⚠️ {NO_BARBER_FOR_SERVICE_TEXT}."),
@@ -808,39 +834,53 @@ async def _show_barber_page_callback(callback: CallbackQuery, service_id: str, i
         )
         return False
 
-    index = index % len(barbers)
-    barber = barbers[index]
+    index = index % len(offerings)
+    offering = offerings[index]
+    barber = offering.barber
     caption, photo = await get_barber_card_content(
         barber,
         title="💈 <b>Barberni tanlang</b>",
-        position=(index + 1, len(barbers)),
+        position=(index + 1, len(offerings)),
+    )
+    offer_lines = "\n".join(build_service_price_lines(offering))
+    caption = (
+        f"{caption}\n"
+        f"{offer_lines}\n"
+        f"🕒 <b>Davomiyligi:</b> {format_duration_minutes(offering.duration_minutes)}\n"
     )
     await _render_catalog_callback(
         callback,
         with_cancel_hint(caption),
-        _barber_nav_keyboard(index, len(barbers), service_id, str(barber.id)),
+        _barber_nav_keyboard(index, len(offerings), service_id, str(barber.id)),
         photo,
     )
     return True
 
 
 async def _show_barber_page_message(message: Message, service_id: str, index: int = 0) -> bool:
-    barbers = await _fetch_active_barbers_by_service(service_id)
-    if not barbers:
+    offerings = await _fetch_active_barber_services_by_service(service_id)
+    if not offerings:
         await message.answer(with_cancel_hint(f"⚠️ {NO_BARBER_FOR_SERVICE_TEXT}."))
         return False
 
-    index = index % len(barbers)
-    barber = barbers[index]
+    index = index % len(offerings)
+    offering = offerings[index]
+    barber = offering.barber
     caption, photo = await get_barber_card_content(
         barber,
         title="💈 <b>Barberni tanlang</b>",
-        position=(index + 1, len(barbers)),
+        position=(index + 1, len(offerings)),
+    )
+    offer_lines = "\n".join(build_service_price_lines(offering))
+    caption = (
+        f"{caption}\n"
+        f"{offer_lines}\n"
+        f"🕒 <b>Davomiyligi:</b> {format_duration_minutes(offering.duration_minutes)}\n"
     )
     await _send_catalog_message(
         message,
         with_cancel_hint(caption),
-        _barber_nav_keyboard(index, len(barbers), service_id, str(barber.id)),
+        _barber_nav_keyboard(index, len(offerings), service_id, str(barber.id)),
         photo,
     )
     return True
@@ -1208,118 +1248,191 @@ async def _restore_temporary_order_to_state(
     await state.update_data(**payload)
 
 
-async def _complete_booking_from_temporary_order(
-    callback: CallbackQuery,
+async def process_booking_confirmation(
+    user_id: int,
     state: FSMContext,
+    callback: CallbackQuery,
     *,
-    answer_text: str,
+    answer_text: str = "Booking muvaffaqiyatli yakunlandi ✅",
 ) -> bool:
-    user_id = callback.from_user.id
-    temp_order = await get_temporary_order(user_id)
-    if temp_order is None:
-        await callback.answer("Yakunlanmagan booking topilmadi", show_alert=True)
-        return False
-
-    date_str = _date_to_iso(temp_order.date)
-    time_str = _time_to_hm(temp_order.time)
-    if not (
-        temp_order.service_id
-        and temp_order.barber_id
-        and date_str
-        and time_str
-        and temp_order.fullname
-        and temp_order.phonenumber
-    ):
-        return False
-
-    available_slots = await _calculate_available_slots(temp_order.service_id, temp_order.barber_id, date_str)
-    if time_str not in available_slots:
-        keyboard = await _build_time_keyboard(temp_order.service_id, temp_order.barber_id, date_str)
-        if keyboard is None:
-            await _persist_booking_state(
-                user_id,
-                state,
-                next_state=UserState.waiting_for_date,
-                is_for_other=bool(temp_order.is_for_other),
-                fullname=temp_order.fullname,
-                phonenumber=temp_order.phonenumber,
-                service_id=temp_order.service_id,
-                barber_id=temp_order.barber_id,
-                date=date_str,
-                time=None,
-                **{LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked)},
-            )
-            await _edit_callback_message_text(
-                callback,
-                with_cancel_hint("⛔ Tanlangan vaqt endi mavjud emas.\n\nIltimos, boshqa sana tanlang:"),
-                await booking_keyboards.date_keyboard(temp_order.service_id, temp_order.barber_id),
-            )
-        else:
-            await _persist_booking_state(
-                user_id,
-                state,
-                next_state=UserState.waiting_for_time,
-                is_for_other=bool(temp_order.is_for_other),
-                fullname=temp_order.fullname,
-                phonenumber=temp_order.phonenumber,
-                service_id=temp_order.service_id,
-                barber_id=temp_order.barber_id,
-                date=date_str,
-                time=None,
-                **{LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked)},
-            )
-            await _edit_callback_message_text(
-                callback,
-                with_cancel_hint("⛔ Tanlangan vaqt endi mavjud emas.\n\nIltimos, boshqa vaqt tanlang:"),
-                keyboard,
-            )
-        await callback.answer("Avval tanlangan vaqt band bo'lib qolgan", show_alert=True)
-        return False
-
-    should_send_menu_updated = False
-    existing_user = None
-    if not temp_order.is_for_other:
-        existing_user = await get_user(user_id)
-
-    if not temp_order.is_for_other:
-        saved_user = await save_user(
-            {
-                "tg_id": user_id,
-                "fullname": temp_order.fullname,
-                "phone": temp_order.phonenumber,
-            }
-        )
-        if saved_user:
-            should_send_menu_updated = existing_user is None
-
-    created = await finalize_temporary_order(user_id)
+    logger.info("Booking confirmation started for user_id=%s", user_id)
     try:
-        await notify_barber_realtime(callback.bot, created.id, int(created.barber_id))
-    except Exception:
-        logger.exception("notify_barber_realtime failed")
+        temp_order = await get_temporary_order(user_id)
+        if temp_order is None:
+            logger.error(
+                "Booking validation failed for user_id=%s: temporary order not found",
+                user_id,
+            )
+            await callback.answer("Yakunlanmagan booking topilmadi", show_alert=True)
+            return False
 
-    await _render_booking_success(
-        callback,
-        fullname=created.fullname,
-        phone=created.phonenumber,
-        service_name=created.service_name,
-        barber_name=created.barber_id_name,
-        date_str=_date_to_iso(created.date) or date_str,
-        time_str=_time_to_hm(created.time) or time_str,
-    )
+        missing_fields = get_missing_temporary_order_fields(temp_order)
+        date_str = _date_to_iso(temp_order.date)
+        time_str = _time_to_hm(temp_order.time)
+        if not date_str and "date" not in missing_fields:
+            missing_fields.append("date")
+        if not time_str and "time" not in missing_fields:
+            missing_fields.append("time")
 
-    await state.clear()
-    await callback.answer(answer_text)
-    if should_send_menu_updated:
-        await callback.message.answer(
-            "📱 Menyu yangilandi:",
-            reply_markup=await get_dynamic_main_keyboard(user_id),
+        if missing_fields:
+            logger.error(
+                "Booking validation failed for user_id=%s. Missing fields: %s",
+                user_id,
+                ", ".join(sorted(missing_fields)),
+            )
+            await callback.answer("Booking ma'lumotlari to'liq emas", show_alert=True)
+            await _edit_callback_message_text(
+                callback,
+                with_cancel_hint(
+                    "❗ Booking ma'lumotlari to'liq emas.\n\n"
+                    "Iltimos, navbat olish jarayonini qayta tekshirib davom eting."
+                ),
+            )
+            return False
+
+        logger.info(
+            "Valid temporary order found for user_id=%s service_id=%s barber_id=%s date=%s time=%s",
+            user_id,
+            temp_order.service_id,
+            temp_order.barber_id,
+            date_str,
+            time_str,
         )
-    await callback.message.answer(
-        "🏠 Asosiy menyu:",
-        reply_markup=get_main_menu(),
-    )
-    return True
+
+        available_slots = await _calculate_available_slots(
+            temp_order.service_id,
+            temp_order.barber_id,
+            date_str,
+        )
+        if time_str not in available_slots:
+            logger.info(
+                "Selected slot is no longer available for user_id=%s barber_id=%s date=%s time=%s",
+                user_id,
+                temp_order.barber_id,
+                date_str,
+                time_str,
+            )
+            keyboard = await _build_time_keyboard(temp_order.service_id, temp_order.barber_id, date_str)
+            if keyboard is None:
+                await _persist_booking_state(
+                    user_id,
+                    state,
+                    next_state=UserState.waiting_for_date,
+                    is_for_other=bool(temp_order.is_for_other),
+                    fullname=temp_order.fullname,
+                    phonenumber=temp_order.phonenumber,
+                    service_id=temp_order.service_id,
+                    barber_id=temp_order.barber_id,
+                    date=date_str,
+                    time=None,
+                    **{LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked)},
+                )
+                await _edit_callback_message_text(
+                    callback,
+                    with_cancel_hint("⛔ Tanlangan vaqt endi mavjud emas.\n\nIltimos, boshqa sana tanlang:"),
+                    await booking_keyboards.date_keyboard(temp_order.service_id, temp_order.barber_id),
+                )
+            else:
+                await _persist_booking_state(
+                    user_id,
+                    state,
+                    next_state=UserState.waiting_for_time,
+                    is_for_other=bool(temp_order.is_for_other),
+                    fullname=temp_order.fullname,
+                    phonenumber=temp_order.phonenumber,
+                    service_id=temp_order.service_id,
+                    barber_id=temp_order.barber_id,
+                    date=date_str,
+                    time=None,
+                    **{LOCKED_BARBER_STATE_KEY: bool(temp_order.selected_barber_locked)},
+                )
+                await _edit_callback_message_text(
+                    callback,
+                    with_cancel_hint("⛔ Tanlangan vaqt endi mavjud emas.\n\nIltimos, boshqa vaqt tanlang:"),
+                    keyboard,
+                )
+            await callback.answer("Avval tanlangan vaqt band bo'lib qolgan", show_alert=True)
+            return False
+
+        should_send_menu_updated = False
+        existing_user = None
+        if not temp_order.is_for_other:
+            existing_user = await get_user(user_id)
+
+        if not temp_order.is_for_other:
+            saved_user = await save_user(
+                {
+                    "tg_id": user_id,
+                    "fullname": temp_order.fullname,
+                    "phone": temp_order.phonenumber,
+                }
+            )
+            if saved_user:
+                should_send_menu_updated = existing_user is None
+
+        logger.info("Calling finalize_temporary_order for user_id=%s", user_id)
+        created = await finalize_temporary_order(user_id)
+        logger.info(
+            "Booking confirmation finalized for user_id=%s order_id=%s",
+            user_id,
+            created.id,
+        )
+        try:
+            await notify_barber_realtime(callback.bot, created.id, int(created.barber_id))
+        except Exception:
+            logger.exception("notify_barber_realtime failed for order_id=%s", created.id)
+
+        await _render_booking_success(
+            callback,
+            fullname=created.fullname,
+            phone=created.phonenumber,
+            service_name=created.service_name,
+            barber_name=created.barber_id_name,
+            date_str=_date_to_iso(created.date) or date_str,
+            time_str=_time_to_hm(created.time) or time_str,
+        )
+
+        await state.clear()
+        await callback.answer(answer_text)
+        if should_send_menu_updated:
+            await callback.message.answer(
+                "📱 Menyu yangilandi:",
+                reply_markup=await get_dynamic_main_keyboard(user_id),
+            )
+        await callback.message.answer(
+            "🏠 Asosiy menyu:",
+            reply_markup=get_main_menu(),
+        )
+        return True
+    except TemporaryOrderIncompleteError as exc:
+        logger.exception(
+            "Temporary order became incomplete during finalization for user_id=%s. Missing fields: %s",
+            user_id,
+            ", ".join(sorted(exc.missing_fields)),
+        )
+        await callback.answer("Booking ma'lumotlari to'liq emas", show_alert=True)
+        await _edit_callback_message_text(
+            callback,
+            with_cancel_hint(
+                "❗ Booking ma'lumotlari to'liq emas.\n\n"
+                "Iltimos, navbat olish jarayonini qayta tekshirib davom eting."
+            ),
+        )
+        return False
+    except TemporaryOrderNotFoundError:
+        logger.exception(
+            "Temporary order disappeared during finalization for user_id=%s",
+            user_id,
+        )
+        await callback.answer("Bu booking allaqachon yakunlangan yoki topilmadi", show_alert=True)
+        return False
+    except Exception:
+        logger.exception("Booking confirmation failed for user_id=%s", user_id)
+        await callback.answer("Buyurtmani saqlashda xatolik yuz berdi", show_alert=True)
+        await callback.message.answer(
+            "❗ Buyurtmani saqlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
+        )
+        return False
 
 
 async def _resume_booking_from_temporary_order(callback: CallbackQuery, state: FSMContext):
@@ -1333,15 +1446,21 @@ async def _resume_booking_from_temporary_order(callback: CallbackQuery, state: F
     await _restore_temporary_order_to_state(temp_order, state, entry_context)
 
     if is_temporary_order_complete(temp_order):
-        await _complete_booking_from_temporary_order(
-            callback,
+        await process_booking_confirmation(
+            callback.from_user.id,
             state,
+            callback,
             answer_text="Booking muvaffaqiyatli yakunlandi ✅",
         )
         return
 
     resume_state = await _infer_resume_state(callback.from_user.id, temp_order)
     user_id = callback.from_user.id
+
+    if resume_state == UserState.waiting_for_booking_target:
+        await _show_booking_target_prompt(callback, state)
+        await callback.answer("Booking davom ettirildi ✅")
+        return
 
     if resume_state == UserState.waiting_for_fullname:
         await _persist_booking_state(user_id, state, next_state=resume_state)
@@ -2004,59 +2123,78 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
     if not await _ensure_callback_state(callback, state, UserState.waiting_for_time):
         return
 
-    data = callback.data
-    _, service_id, barber_id, date_str, time_str = data.split("_", 4)
     user_id = callback.from_user.id
+    data = callback.data or ""
 
-    markup = callback.message.reply_markup
-    if markup and markup.inline_keyboard:
-        new_keyboard = [
-            [btn for btn in row if btn.callback_data != data]
-            for row in markup.inline_keyboard
-            if any(btn.callback_data != data for btn in row)
-        ]
-        await callback.message.edit_reply_markup(
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard)
+    try:
+        parts = data.split("_", 4)
+        if len(parts) != 5 or parts[0] != "confirm":
+            logger.error("Invalid confirm callback data for user_id=%s: %r", user_id, data)
+            await callback.answer("Tasdiqlash ma'lumoti noto'g'ri", show_alert=True)
+            return
+
+        _, service_id, barber_id, date_str, time_str = parts
+        user_data = await state.get_data()
+        temp_order = await get_temporary_order(user_id)
+        if temp_order is None:
+            logger.error(
+                "Cannot persist confirmation for user_id=%s because temporary order is missing",
+                user_id,
+            )
+            await process_booking_confirmation(
+                user_id,
+                state,
+                callback,
+                answer_text="Vaqt tanlandi ✅",
+            )
+            return
+
+        is_for_other = bool(
+            user_data.get(
+                "is_for_other",
+                bool(temp_order.is_for_other),
+            )
+        )
+        fullname = user_data.get("fullname") or temp_order.fullname
+        phone = user_data.get("phonenumber") or temp_order.phonenumber
+
+        if not is_for_other:
+            existing_user = await get_user(user_id)
+            if existing_user:
+                fullname = fullname or existing_user.fullname
+                phone = phone or existing_user.phone
+
+        logger.info(
+            "Persisting selected booking slot before finalization for user_id=%s service_id=%s barber_id=%s date=%s time=%s",
+            user_id,
+            service_id,
+            barber_id,
+            date_str,
+            time_str,
+        )
+        await _persist_booking_state(
+            user_id,
+            state,
+            next_state=UserState.waiting_for_time,
+            is_for_other=is_for_other,
+            fullname=fullname,
+            phonenumber=phone,
+            service_id=service_id,
+            barber_id=barber_id,
+            date=date_str,
+            time=time_str,
+            **{LOCKED_BARBER_STATE_KEY: bool(user_data.get(LOCKED_BARBER_STATE_KEY))},
         )
 
-    available_slots = await _calculate_available_slots(service_id, barber_id, date_str)
-    if time_str not in available_slots:
-        await callback.answer(
-            "⛔ Ushbu vaqt endi mavjud emas.\nBoshqa vaqt tanlang.",
-            show_alert=True,
+        await process_booking_confirmation(
+            user_id,
+            state,
+            callback,
+            answer_text="Vaqt tanlandi ✅",
         )
-        return
-
-    user_data = await state.get_data()
-    is_for_other = bool(user_data.get("is_for_other"))
-    fullname = user_data.get("fullname")
-    phone = user_data.get("phonenumber")
-
-    if not is_for_other:
-        existing_user = await get_user(user_id)
-        if existing_user:
-            fullname = fullname or existing_user.fullname
-            phone = phone or existing_user.phone
-
-    fullname = fullname or "Noma'lum"
-    phone = phone or "Noma'lum"
-
-    await _persist_booking_state(
-        user_id,
-        state,
-        next_state=UserState.waiting_for_time,
-        is_for_other=is_for_other,
-        fullname=fullname,
-        phonenumber=phone,
-        service_id=service_id,
-        barber_id=barber_id,
-        date=date_str,
-        time=time_str,
-        **{LOCKED_BARBER_STATE_KEY: bool(user_data.get(LOCKED_BARBER_STATE_KEY))},
-    )
-
-    await _complete_booking_from_temporary_order(
-        callback,
-        state,
-        answer_text="Vaqt tanlandi ✅",
-    )
+    except Exception:
+        logger.exception("confirm handler failed for user_id=%s callback_data=%r", user_id, data)
+        await callback.answer("Buyurtmani tasdiqlashda xatolik yuz berdi", show_alert=True)
+        await callback.message.answer(
+            "❗ Buyurtmani tasdiqlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
+        )

@@ -7,20 +7,23 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from sql.db_services import (
-    DISCOUNT_SCOPE_ALL,
-    DISCOUNT_SCOPE_SINGLE,
+DISCOUNT_SCOPE_ALL = "all"
+DISCOUNT_SCOPE_SINGLE = "single"
+
+
+from sql.db_barber_services import (
     SERVICE_DISCOUNT_TIMEZONE,
-    bulk_set_service_discount,
+    bulk_set_barber_service_discount as bulk_set_service_discount,
     clear_all_service_discounts,
-    clear_service_discount,
+    clear_barber_service_discount as clear_service_discount,
     format_service_discount_expiry,
-    get_service_by_id,
     has_global_discount_on_all_services,
-    list_discounted_services_ordered,
-    list_services_ordered,
-    set_service_discount,
+    list_discounted_barber_services_ordered as list_discounted_services_ordered,
+    list_barber_services_ordered as list_services_ordered,
+    set_barber_service_discount as set_service_discount,
 )
+
+from sql.db_services import get_service_by_id
 from utils.discounts import (
     DiscountValidationError,
     build_bulk_discount_results,

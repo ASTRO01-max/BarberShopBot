@@ -9,7 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import delete, func, select
 
 from sql.db import async_session
-from sql.models import BarberExpanded, BarberPhotos, Barbers, OrdinaryUser
+from sql.models import BarberPhotos, BarberServices, Barbers, OrdinaryUser
 from utils.states import AdminStates
 from .admin_buttons import (
     BARBER_ADD_CB,
@@ -400,7 +400,7 @@ async def confirm_barber_delete(callback: types.CallbackQuery):
 
         deleted_name = _barber_display_name(barber)
         await session.execute(delete(BarberPhotos).where(BarberPhotos.barber_id == barber_id))
-        await session.execute(delete(BarberExpanded).where(BarberExpanded.barber_id == barber_id))
+        await session.execute(delete(BarberServices).where(BarberServices.barber_id == barber_id))
         await session.delete(barber)
         await session.commit()
 

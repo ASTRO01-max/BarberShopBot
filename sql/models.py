@@ -13,8 +13,9 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Numeric,
+    UniqueConstraint,
 )
-from sqlalchemy import LargeBinary
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sql.db import Base
 
@@ -51,14 +52,37 @@ class Order(Base):
     user_id = Column(BigInteger, nullable=False, index=True)
     fullname = Column(String(100), nullable=False)
     phonenumber = Column(String(30), nullable=False)
-    service_id = Column(String(50), nullable=False)
-    service_name = Column(String(50), nullable=False)
-    barber_id = Column(String(50), nullable=False)
-    barber_id_name = Column(String(100), nullable=False)
+    barber_service_id = Column(
+        Integer,
+        ForeignKey("barber_services.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    barber_id = Column(
+        BigInteger,
+        ForeignKey("barbers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    service_name = Column(String(100), nullable=False)
+    barber_name = Column(String(150), nullable=False)
+    booked_price = Column(Integer, nullable=False)
+    booked_duration_minutes = Column(Integer, nullable=False)
     date = Column(Date, nullable=False)
     time = Column(Time, nullable=False)
     booked_date = Column(Date, nullable=False)
     booked_time = Column(Time, nullable=False)
+
+    barber_service = relationship("BarberServices", back_populates="orders")
+    barber = relationship("Barbers", back_populates="orders")
+
+    @property
+    def service_id(self) -> str:
+        return str(self.barber_service_id or "")
+
+    @property
+    def barber_id_name(self) -> str:
+        return self.barber_name
 
 
 #Vaqtinchalik Navbat ma'lumotlari
@@ -73,13 +97,31 @@ class TemporaryOrder(Base):
     fullname = Column(String(100), nullable=True)
     phonenumber = Column(String(30), nullable=True)
     service_id = Column(String(50), nullable=True)
-    service_name = Column(String(50), nullable=True)
     barber_id = Column(String(50), nullable=True)
-    barber_id_name = Column(String(100), nullable=True)
+    barber_service_id = Column(
+        Integer,
+        ForeignKey("barber_services.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    service_name = Column(String(100), nullable=True)
+    barber_name = Column(String(150), nullable=True)
+    booked_price = Column(Integer, nullable=True)
+    booked_duration_minutes = Column(Integer, nullable=True)
     date = Column(Date, nullable=True)
     time = Column(Time, nullable=True)
     booked_date = Column(Date, nullable=True)
     booked_time = Column(Time, nullable=True)
+
+    barber_service = relationship("BarberServices")
+
+    @property
+    def barber_id_name(self) -> str | None:
+        return self.barber_name
+
+    @barber_id_name.setter
+    def barber_id_name(self, value: str | None) -> None:
+        self.barber_name = value
 
 
 #Admin foydalanuvchilar
@@ -109,6 +151,14 @@ class Barbers(Base):
     is_paused = Column(Boolean, default=False)
     breakdown = Column(String(20), nullable=True)     # "13:00-14:00" yoki None
     is_paused_date = Column(Date, nullable=False)
+
+    barber_services = relationship(
+        "BarberServices",
+        back_populates="barber",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    orders = relationship("Order", back_populates="barber")
     
     def __repr__(self):
         return f"<Barber {self.barber_first_name} {self.barber_last_name}>"
@@ -128,20 +178,58 @@ class Services(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
-    price = Column(Integer, nullable=False)
-    duration = Column(String(50), nullable=False)
     photo = Column(String(300), nullable=True)
 
+    barber_services = relationship(
+        "BarberServices",
+        back_populates="service",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
-#Xizmatlarga chegirmalar
-class ServiceDiscounts(Base):
-    __tablename__ = "service_discounts"
+class BarberServices(Base):
+    __tablename__ = "barber_services"
+    __table_args__ = (
+        UniqueConstraint("barber_id", "service_id", name="uq_barber_services_barber_service"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    barber_id = Column(
+        BigInteger,
+        ForeignKey("barbers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     service_id = Column(
         BigInteger,
         ForeignKey("services.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    price = Column(Integer, nullable=False)
+    duration_minutes = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    barber = relationship("Barbers", back_populates="barber_services")
+    service = relationship("Services", back_populates="barber_services")
+    discounts = relationship(
+        "BarberServiceDiscounts",
+        back_populates="barber_service",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    orders = relationship("Order", back_populates="barber_service")
+
+
+#Barber xizmatlariga chegirmalar
+class BarberServiceDiscounts(Base):
+    __tablename__ = "barber_service_discounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    barber_service_id = Column(
+        Integer,
+        ForeignKey("barber_services.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
         index=True,
@@ -157,6 +245,8 @@ class ServiceDiscounts(Base):
     )
     end_at = Column(Date, nullable=False)
     end_time = Column(Time, nullable=False)
+
+    barber_service = relationship("BarberServices", back_populates="discounts")
 
 
 #Xizmatlar Profili
@@ -240,20 +330,6 @@ class BarberOrderInbox(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-
-
-class BarberExpanded(Base):
-    __tablename__ = "barbers_expanded"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    barber_id = Column(
-        BigInteger,
-        ForeignKey("barbers.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    barber_includes = Column(JSON, nullable=False, default=list)
 
 
 class BarberProfileSettings(Base):

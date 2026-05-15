@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sql.db import async_session
 from sql.models import Admins, Services
 from utils.emoji_map import SERVICE_EMOJIS
-from utils.service_pricing import build_service_price_lines, format_price
+from utils.service_pricing import format_price
 from .admin_buttons import ADMIN_MAIN_MENU_TITLE, get_main_menu
 
 CANCEL_HINT = "\n\n❌ Bekor qilish uchun /cancel yuboring."
@@ -28,13 +28,13 @@ def render_service_text(
 ) -> str:
     service_name = (service.name or "").strip() or "Noma'lum xizmat"
     emoji = SERVICE_EMOJIS.get(service_name, "🔹")
+    photo_status = "mavjud" if getattr(service, "photo", None) else "yo'q"
 
     lines = [
         title,
         "",
         f"{emoji} <b>{escape(service_name)}</b>",
-        *build_service_price_lines(service),
-        f"🕒 <b>Davomiyligi:</b> {escape(str(service.duration or '-'))}",
+        f"🖼 <b>Rasm:</b> {photo_status}",
     ]
 
     if extra_lines:
