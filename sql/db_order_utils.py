@@ -112,6 +112,17 @@ async def save_order(order: dict):
             phonenumber = order.get("phonenumber") or order.get("phone") or "Noma'lum"
             date_val = _parse_date(order.get("date"))
             time_val = _parse_time(order.get("time"))
+            service_id = int(barber_service.service_id)
+            barber_id = int(barber_service.barber_id)
+            service_name = (
+                order.get("service_name")
+                or (barber_service.service.name if barber_service.service else str(service_id))
+            )
+            barber_name = (
+                order.get("barber_name")
+                or order.get("barber_id_name")
+                or _barber_name(barber_service.barber)
+            )
 
             now = datetime.now()
             new_order = Order(
@@ -119,16 +130,11 @@ async def save_order(order: dict):
                 fullname=fullname,
                 phonenumber=phonenumber,
                 barber_service_id=int(barber_service.id),
-                barber_id=int(barber_service.barber_id),
-                service_name=(
-                    order.get("service_name")
-                    or (barber_service.service.name if barber_service.service else str(barber_service.service_id))
-                ),
-                barber_name=(
-                    order.get("barber_name")
-                    or order.get("barber_id_name")
-                    or _barber_name(barber_service.barber)
-                ),
+                service_id=service_id,
+                barber_id=barber_id,
+                service_name=service_name,
+                barber_name=barber_name,
+                barber_id_name=barber_name,
                 booked_price=int(order.get("booked_price") or await _current_price(session, barber_service)),
                 booked_duration_minutes=int(
                     order.get("booked_duration_minutes") or barber_service.duration_minutes

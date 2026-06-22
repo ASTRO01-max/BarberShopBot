@@ -1,5 +1,6 @@
-﻿# handlers/booking.py
+# handlers/booking.py
 import logging
+import math
 import re
 from datetime import date, datetime, time, timedelta
 from aiogram import F, Router, types
@@ -60,7 +61,10 @@ SELECTED_BARBER_UNAVAILABLE_TEXT = "❌ Tanlangan barber ushbu xizmatni bajarmay
 LOCKED_BARBER_STATE_KEY = "selected_barber_locked"
 PENDING_BOOKING_ENTRY_KEY = "pending_booking_entry"
 TIME_BUTTONS_PER_ROW = 2
+TIME_ROWS_PER_PAGE = 6
+TIME_SLOTS_PER_PAGE = TIME_ROWS_PER_PAGE * TIME_BUTTONS_PER_ROW
 DEFAULT_EXISTING_ORDER_DURATION_MINUTES = 60
+DATE_BUTTON_DAYS_AHEAD = 7
 ISO_DATE_FORMAT = "%Y-%m-%d"
 HM_TIME_FORMAT = "%H:%M"
 DURATION_HOUR_PATTERN = re.compile(
@@ -72,6 +76,38 @@ DURATION_MINUTE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TIME_TOKEN_PATTERN = re.compile(r"\d{1,2}:\d{2}")
+WEEKDAY_ALIASES = {
+    "dushanba": 0,
+    "seshanba": 1,
+    "chorshanba": 2,
+    "payshanba": 3,
+    "juma": 4,
+    "shanba": 5,
+    "yakshanba": 6,
+}
+WEEKDAY_LABELS = [
+    "Dushanba",
+    "Seshanba",
+    "Chorshanba",
+    "Payshanba",
+    "Juma",
+    "Shanba",
+    "Yakshanba",
+]
+MONTH_LABELS = [
+    "Yanvar",
+    "Fevral",
+    "Mart",
+    "Aprel",
+    "May",
+    "Iyun",
+    "Iyul",
+    "Avgust",
+    "Sentabr",
+    "Oktabr",
+    "Noyabr",
+    "Dekabr",
+]
 
 
 def with_cancel_hint(text: str) -> str:
@@ -160,6 +196,10 @@ async def _persist_booking_state(
 
     data = await state.get_data()
     current_state = _state_value(next_state) or await state.get_state()
+
+    service_id_raw = data.get("service_id")
+    barber_id_raw = data.get("barber_id")
+
     await upsert_temporary_order(
         {
             "user_id": user_id,
@@ -168,8 +208,8 @@ async def _persist_booking_state(
             "selected_barber_locked": bool(data.get(LOCKED_BARBER_STATE_KEY)),
             "fullname": data.get("fullname"),
             "phonenumber": data.get("phonenumber"),
-            "service_id": str(data["service_id"]) if data.get("service_id") is not None else None,
-            "barber_id": str(data["barber_id"]) if data.get("barber_id") is not None else None,
+            "service_id": str(service_id_raw) if service_id_raw is not None else None,
+            "barber_id": str(barber_id_raw) if barber_id_raw is not None else None,
             "barber_service_id": (
                 int(data["barber_service_id"])
                 if data.get("barber_service_id") is not None
@@ -455,6 +495,81 @@ def _combine_local_datetime(target_date: date, target_time: time, tzinfo) -> dat
     return naive_value.replace(tzinfo=tzinfo) if tzinfo else naive_value
 
 
+def _normalize_work_days_text(raw_work_days: str | None) -> str:
+    return (
+        (raw_work_days or "")
+        .strip()
+        .lower()
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2019", "'")
+    )
+
+
+def _weekday_from_token(token: str) -> int | None:
+    normalized = re.sub(r"[^a-z']", " ", token.lower())
+    for word in normalized.split():
+        if word in WEEKDAY_ALIASES:
+            return WEEKDAY_ALIASES[word]
+    return None
+
+
+def _parse_work_days(raw_work_days: str | None) -> set[int] | None:
+    text = _normalize_work_days_text(raw_work_days)
+    if not text:
+        return None
+
+    if "har kuni" in text or "xar kuni" in text or "every day" in text:
+        return set(range(7))
+
+    weekdays: set[int] = set()
+    matched_any = False
+    segments = [segment.strip() for segment in re.split(r"[,;]", text) if segment.strip()]
+    if not segments:
+        segments = [text]
+
+    for segment in segments:
+        if "-" in segment:
+            start_token, end_token = [part.strip() for part in segment.split("-", 1)]
+            start_day = _weekday_from_token(start_token)
+            end_day = _weekday_from_token(end_token)
+            if start_day is None or end_day is None:
+                continue
+
+            matched_any = True
+            if start_day <= end_day:
+                weekdays.update(range(start_day, end_day + 1))
+            else:
+                weekdays.update(range(start_day, 7))
+                weekdays.update(range(0, end_day + 1))
+            continue
+
+        segment_days = {
+            day
+            for token in segment.split()
+            for day in [_weekday_from_token(token)]
+            if day is not None
+        }
+        if segment_days:
+            matched_any = True
+            weekdays.update(segment_days)
+
+    return weekdays if matched_any else None
+
+
+def _barber_works_on_date(barber: Barbers, target_date: date) -> bool:
+    work_days = _parse_work_days(getattr(barber, "work_days", None))
+    if work_days is None:
+        logger.warning(
+            "Unable to parse barber work_days=%r barber_id=%s; allowing date=%s",
+            getattr(barber, "work_days", None),
+            getattr(barber, "id", None),
+            target_date,
+        )
+        return True
+    return target_date.weekday() in work_days
+
+
 def _merge_busy_intervals(
     intervals: list[tuple[datetime, datetime]],
 ) -> list[tuple[datetime, datetime]]:
@@ -523,6 +638,15 @@ async def _calculate_available_slots(
         return []
 
     busy_intervals: list[tuple[datetime, datetime]] = []
+
+    # Barber tanaffus vaqtini (breakdown) busy intervalga qo'shish
+    breakdown_bounds = _parse_work_time_bounds(barber.breakdown)
+    if breakdown_bounds is not None:
+        break_start_time, break_end_time = breakdown_bounds
+        break_start = _combine_local_datetime(target_date, break_start_time, tzinfo)
+        break_end = _combine_local_datetime(target_date, break_end_time, tzinfo)
+        busy_intervals.append((break_start, break_end))
+
     for booked_time_raw, booked_duration_raw in booked_rows:
         booked_time = _normalize_time_value(booked_time_raw)
         if booked_time is None:
@@ -565,19 +689,48 @@ async def _calculate_available_slots(
     return available_slots
 
 
+def _time_slot_row_count(slot_count: int) -> int:
+    if slot_count <= 0:
+        return 0
+    return math.ceil(slot_count / TIME_BUTTONS_PER_ROW)
+
+
+def _time_selection_needs_pagination(slot_count: int) -> bool:
+    return _time_slot_row_count(slot_count) > TIME_ROWS_PER_PAGE
+
+
+def _paginate_time_slots(slots: list[str], page: int) -> tuple[list[str], int, int]:
+    total_pages = max(1, math.ceil(len(slots) / TIME_SLOTS_PER_PAGE))
+    page = max(0, min(page, total_pages - 1))
+    start_idx = page * TIME_SLOTS_PER_PAGE
+    end_idx = start_idx + TIME_SLOTS_PER_PAGE
+    return slots[start_idx:end_idx], page, total_pages
+
+
 async def _build_time_keyboard(
     service_id: str,
     barber_id: str,
     date_str: str,
-) -> InlineKeyboardMarkup | None:
+    page: int = 0,
+) -> tuple[InlineKeyboardMarkup, int, int] | None:
     available_slots = await _calculate_available_slots(service_id, barber_id, date_str)
     if not available_slots:
         return None
 
+    total_slots = len(available_slots)
+    use_pagination = _time_selection_needs_pagination(total_slots)
+
+    if use_pagination:
+        page_slots, page, total_pages = _paginate_time_slots(available_slots, page)
+    else:
+        page_slots = available_slots
+        page = 0
+        total_pages = 1
+
     inline_rows: list[list[InlineKeyboardButton]] = []
     current_row: list[InlineKeyboardButton] = []
 
-    for index, slot_time in enumerate(available_slots, start=1):
+    for index, slot_time in enumerate(page_slots, start=1):
         current_row.append(
             InlineKeyboardButton(
                 text=slot_time,
@@ -591,7 +744,43 @@ async def _build_time_keyboard(
     if current_row:
         inline_rows.append(current_row)
 
-    return InlineKeyboardMarkup(inline_keyboard=inline_rows)
+    if use_pagination:
+        prev_page = max(page - 1, 0)
+        next_page = min(page + 1, total_pages - 1)
+        nav_row = [
+            InlineKeyboardButton(
+                text="⬅️ Oldingi",
+                callback_data=f"booktime_page_{service_id}_{barber_id}_{date_str}_{prev_page}",
+            ),
+            InlineKeyboardButton(
+                text=f"📄 {page + 1} / {total_pages}",
+                callback_data="noop",
+            ),
+            InlineKeyboardButton(
+                text="➡️ Keyingi",
+                callback_data=f"booktime_page_{service_id}_{barber_id}_{date_str}_{next_page}",
+            ),
+        ]
+        inline_rows.append(nav_row)
+
+    # Always add back button for great UX
+    back_row = [
+        InlineKeyboardButton(
+            text="🔙 Orqaga",
+            callback_data=f"back_date_{service_id}_{barber_id}",
+        )
+    ]
+    inline_rows.append(back_row)
+
+    return InlineKeyboardMarkup(inline_keyboard=inline_rows), page, total_pages
+
+
+def _time_selection_prompt(page: int = 0, total_pages: int = 1) -> str:
+    if total_pages > 1:
+        return with_cancel_hint(
+            f"⏰ Vaqt tanlang (sahifa {page + 1}/{total_pages}):"
+        )
+    return with_cancel_hint("⏰ Vaqt tanlang:")
 
 
 def _booking_target_keyboard() -> InlineKeyboardMarkup:
@@ -749,7 +938,7 @@ async def _render_catalog_callback(
         except Exception:
             pass
         await callback.message.answer(
-            caption,
+            text=caption or "⚠️",
             reply_markup=keyboard,
             parse_mode="HTML",
         )
@@ -1116,9 +1305,9 @@ async def _show_time_selection_callback(
         date=date_str,
         time=None,
     )
-    keyboard = await _build_time_keyboard(service_id, barber_id, date_str)
+    time_result = await _build_time_keyboard(service_id, barber_id, date_str)
 
-    if keyboard is None:
+    if time_result is None:
         back_markup = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -1144,9 +1333,10 @@ async def _show_time_selection_callback(
             time=None,
         )
     else:
+        keyboard, page, total_pages = time_result
         await _edit_callback_message_text(
             callback,
-            with_cancel_hint("⏰ Vaqt tanlang:"),
+            _time_selection_prompt(page, total_pages),
             keyboard,
         )
         await _persist_booking_state(
@@ -1177,9 +1367,9 @@ async def _show_time_selection_message(
         date=date_str,
         time=None,
     )
-    keyboard = await _build_time_keyboard(service_id, barber_id, date_str)
+    time_result = await _build_time_keyboard(service_id, barber_id, date_str)
 
-    if keyboard is None:
+    if time_result is None:
         await _persist_booking_state(
             message.from_user.id,
             state,
@@ -1192,6 +1382,7 @@ async def _show_time_selection_message(
         await message.answer(with_cancel_hint("❌ Bu kunda bo'sh vaqt yo'q."))
         return
 
+    keyboard, page, total_pages = time_result
     await _persist_booking_state(
         message.from_user.id,
         state,
@@ -1201,7 +1392,7 @@ async def _show_time_selection_message(
         date=date_str,
         time=None,
     )
-    await message.answer(with_cancel_hint("⏰ Vaqtni tanlang:"), reply_markup=keyboard)
+    await message.answer(_time_selection_prompt(page, total_pages), reply_markup=keyboard)
 
 
 async def _render_booking_success(
@@ -1312,8 +1503,8 @@ async def process_booking_confirmation(
                 date_str,
                 time_str,
             )
-            keyboard = await _build_time_keyboard(temp_order.service_id, temp_order.barber_id, date_str)
-            if keyboard is None:
+            time_result = await _build_time_keyboard(temp_order.service_id, temp_order.barber_id, date_str)
+            if time_result is None:
                 await _persist_booking_state(
                     user_id,
                     state,
@@ -1333,6 +1524,7 @@ async def process_booking_confirmation(
                     await booking_keyboards.date_keyboard(temp_order.service_id, temp_order.barber_id),
                 )
             else:
+                keyboard, page, total_pages = time_result
                 await _persist_booking_state(
                     user_id,
                     state,
@@ -1387,7 +1579,7 @@ async def process_booking_confirmation(
             fullname=created.fullname,
             phone=created.phonenumber,
             service_name=created.service_name,
-            barber_name=created.barber_id_name,
+            barber_name=created.barber_name,
             date_str=_date_to_iso(created.date) or date_str,
             time_str=_time_to_hm(created.time) or time_str,
         )
@@ -1886,7 +2078,7 @@ async def process_phonenumber(message: Message, state: FSMContext):
             )
         )
 
-    if service_id:
+    if service_id and not barber_id:
         await _persist_booking_state(
             message.from_user.id,
             state,
@@ -2046,7 +2238,12 @@ async def book_step3(callback: CallbackQuery, state: FSMContext):
     if not await _ensure_callback_state(callback, state, UserState.waiting_for_date):
         return
 
-    _, service_id, barber_id, date = callback.data.split("_")
+    parts = callback.data.split("_", 3)
+    if len(parts) != 4:
+        await callback.answer("Noto'g'ri sana ma'lumoti", show_alert=True)
+        return
+
+    _, service_id, barber_id, date = parts
     await _show_time_selection_callback(
         callback,
         state,
@@ -2093,7 +2290,12 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
     ):
         return
 
-    _, _, service_id, barber_id = callback.data.split("_")
+    parts = callback.data.split("_", 3)
+    if len(parts) != 4:
+        await callback.answer("Noto'g'ri so'rov", show_alert=True)
+        return
+
+    _, _, service_id, barber_id = parts
 
     if callback.message.photo:
         await callback.message.edit_caption(
@@ -2198,3 +2400,38 @@ async def confirm(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer(
             "❗ Buyurtmani tasdiqlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring."
         )
+
+
+async def booking_time_page(callback: CallbackQuery, state: FSMContext):
+    if not await _ensure_callback_state(callback, state, UserState.waiting_for_time):
+        return
+
+    parts = callback.data.split("_")
+    # Callback format: booktime_page_{service_id}_{barber_id}_{date_str}_{page}
+    if len(parts) != 6 or parts[1] != "page":
+        await callback.answer("Noto'g'ri so'rov", show_alert=True)
+        return
+
+    _, _, service_id, barber_id, date_str, page_str = parts
+    try:
+        page = int(page_str)
+    except ValueError:
+        await callback.answer("Noto'g'ri sahifa", show_alert=True)
+        return
+
+    time_result = await _build_time_keyboard(service_id, barber_id, date_str, page)
+    if time_result is None:
+        await callback.answer("Bo'sh vaqtlar topilmadi", show_alert=True)
+        return
+
+    keyboard, current_page, total_pages = time_result
+    await _edit_callback_message_text(
+        callback,
+        _time_selection_prompt(current_page, total_pages),
+        keyboard,
+    )
+    await callback.answer()
+
+
+async def noop_callback(callback: CallbackQuery):
+    await callback.answer()

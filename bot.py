@@ -20,7 +20,7 @@ from handlers import (
     back,
 )
 from handlers.main_btn_handle import router as main_btn_router
-
+        
 # Bot va Dispatcher obyektlari
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -193,6 +193,17 @@ dp.callback_query.register(
 )
 
 # Orqaga menyuga qaytish
+dp.callback_query.register(
+    booking.booking_time_page,
+    booking.UserState.waiting_for_time,
+    F.data.startswith("booktime_page_")
+)
+
+dp.callback_query.register(
+    booking.noop_callback,
+    F.data == "noop"
+)
+
 dp.callback_query.register(
     back.back_to_menu,
     lambda c: c.data == "back"

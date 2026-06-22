@@ -1,5 +1,4 @@
 # sql/models.py
-
 from sqlalchemy import (
     Column,
     Integer,
@@ -64,7 +63,14 @@ class Order(Base):
         nullable=True,
         index=True,
     )
+    service_id = Column(
+        BigInteger,
+        ForeignKey("services.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     service_name = Column(String(100), nullable=False)
+    barber_id_name = Column(String(150), nullable=False)
     barber_name = Column(String(150), nullable=False)
     booked_price = Column(Integer, nullable=False)
     booked_duration_minutes = Column(Integer, nullable=False)
@@ -75,14 +81,7 @@ class Order(Base):
 
     barber_service = relationship("BarberServices", back_populates="orders")
     barber = relationship("Barbers", back_populates="orders")
-
-    @property
-    def service_id(self) -> str:
-        return str(self.barber_service_id or "")
-
-    @property
-    def barber_id_name(self) -> str:
-        return self.barber_name
+    service = relationship("Services")
 
 
 #Vaqtinchalik Navbat ma'lumotlari
@@ -150,7 +149,7 @@ class Barbers(Base):
     work_time = Column(String(20), nullable=True)     # "09:00-18:00"
     is_paused = Column(Boolean, default=False)
     breakdown = Column(String(20), nullable=True)     # "13:00-14:00" yoki None
-    is_paused_date = Column(Date, nullable=False)
+    is_paused_date = Column(Date, nullable=True)
 
     barber_services = relationship(
         "BarberServices",
@@ -168,7 +167,12 @@ class BarberPhotos(Base):
     __tablename__ = "barber_photos"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    barber_id = Column(BigInteger, nullable=False)
+    barber_id = Column(
+        BigInteger,
+        ForeignKey("barbers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     photo = Column(String(300), nullable=True)
 
 
@@ -317,7 +321,12 @@ class BarberOrderInbox(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # Order ID (orders.id)
-    order_id = Column(Integer, nullable=False, index=True)
+    order_id = Column(
+        Integer,
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     # Barber telegram id (Barbers.tg_id)
     barber_tg_id = Column(BigInteger, nullable=False, index=True)

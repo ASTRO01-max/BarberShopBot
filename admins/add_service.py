@@ -403,19 +403,21 @@ async def save_service_name(message: types.Message, state: FSMContext):
 )
 async def save_service_without_photo(call: types.CallbackQuery, state: FSMContext):
     service = await _save_service_from_state(state, photo=None)
-    if call.message:
-        if service is None:
-            await call.message.answer("❌ Xizmat ma'lumotlari topilmadi. Qayta boshlang.")
-        else:
-            emoji = SERVICE_EMOJIS.get(service.name, "🔹")
-            await call.message.answer(
-                "✅ <b>Yangi xizmat qo'shildi!</b>\n\n"
-                f"{emoji} <b>{escape(service.name)}</b>\n"
-                "🖼 Rasm: <i>Yo'q</i>",
-                parse_mode="HTML",
-            )
-
     await state.clear()
+
+    if service is None:
+        await call.answer("❌ Xizmat ma'lumotlari topilmadi. Qayta boshlang.", show_alert=True)
+        return
+
+    emoji = SERVICE_EMOJIS.get(service.name, "🔹")
+    notice = (
+        "✅ <b>Yangi xizmat qo'shildi!</b>\n\n"
+        f"{emoji} <b>{escape(service.name)}</b>\n"
+        "🖼 Rasm: <i>Yo'q</i>"
+    )
+
+    total = await _count_services()
+    await _show_service_page_callback(call, index=0, total=total, notice=notice)
     await call.answer()
 
 
@@ -433,11 +435,12 @@ async def ask_service_photo(call: types.CallbackQuery, state: FSMContext):
 async def add_service_photo(message: types.Message, state: FSMContext):
     photo_file_id = message.photo[-1].file_id
     service = await _save_service_from_state(state, photo=photo_file_id)
+    await state.clear()
+
     if service is None:
         await message.answer(
             with_cancel_hint("❌ Xizmat ma'lumotlari topilmadi. Qayta boshlang.")
         )
-        await state.clear()
         return
 
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
@@ -447,8 +450,7 @@ async def add_service_photo(message: types.Message, state: FSMContext):
         "🖼 Rasm: <i>mavjud</i>",
         parse_mode="HTML",
     )
-
-    await state.clear()
+    await _show_service_page_message(message, index=0)
 
 
 @router.message(StateFilter(AdminStates.adding_service_photo))

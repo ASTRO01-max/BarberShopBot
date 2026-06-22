@@ -182,6 +182,28 @@ async def _apply_barber_service_snapshot(
     order.booked_duration_minutes = int(barber_service.duration_minutes)
 
 
+def _order_snapshot_from_temporary_order(
+    temp_order: TemporaryOrder,
+    barber_service: BarberServices,
+) -> dict:
+    service_id = int(barber_service.service_id)
+    barber_id = int(barber_service.barber_id)
+    barber_name = temp_order.barber_name or str(barber_id)
+    service_name = temp_order.service_name or str(service_id)
+    return {
+        "barber_service_id": int(barber_service.id),
+        "service_id": service_id,
+        "barber_id": barber_id,
+        "service_name": service_name,
+        "barber_name": barber_name,
+        "barber_id_name": barber_name,
+        "booked_price": int(temp_order.booked_price or barber_service.price),
+        "booked_duration_minutes": int(
+            temp_order.booked_duration_minutes or barber_service.duration_minutes
+        ),
+    }
+
+
 def get_missing_temporary_order_fields(order: TemporaryOrder | None) -> list[str]:
     if order is None:
         return [*REQUIRED_TEMPORARY_ORDER_FIELDS, "barber_service_id"]
@@ -380,18 +402,12 @@ async def finalize_temporary_order(user_id: int) -> Order:
             await _apply_barber_service_snapshot(session, temp_order, barber_service)
 
             now = datetime.now()
+            snapshot = _order_snapshot_from_temporary_order(temp_order, barber_service)
             new_order = Order(
                 user_id=normalized_user_id,
                 fullname=temp_order.fullname,
                 phonenumber=temp_order.phonenumber,
-                barber_service_id=int(barber_service.id),
-                barber_id=int(barber_service.barber_id),
-                service_name=temp_order.service_name or str(barber_service.service_id),
-                barber_name=temp_order.barber_name or str(barber_service.barber_id),
-                booked_price=int(temp_order.booked_price or barber_service.price),
-                booked_duration_minutes=int(
-                    temp_order.booked_duration_minutes or barber_service.duration_minutes
-                ),
+                **snapshot,
                 date=temp_order.date,
                 time=temp_order.time,
                 booked_date=now.date(),

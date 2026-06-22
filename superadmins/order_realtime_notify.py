@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sql.db import async_session
@@ -64,7 +64,7 @@ async def _build_short_text(order_id: int) -> str:
         order = await session.get(Order, int(order_id))
         if not order:
             return "⚠️ Buyurtma topilmadi."
-        service_name = await _service_name(session, order.service_id)
+        service_name = order.service_name or "Noma'lum"
 
         # Qisqa preview uchun username fallback
         username = "—"

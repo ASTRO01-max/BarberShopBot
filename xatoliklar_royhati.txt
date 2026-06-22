@@ -1,0 +1,23 @@
+XATOLIKLAR VA MUAMMOLAR RO'YHATI
+---------------------------------
+
+1. "💈 Xizmatlar" tugmasining ishlamaslik muammosi (Hozirda mavjud):
+   - Fayl: handlers/services.py
+   - Tavsif: "💈 Xizmatlar" tugmasi bosilganda, bot foydalanuvchiga xizmatlarni ko'rsatishi kerak. Biroq, kodda services jadvalidan eski va o'chirilgan ustunlarga (price va duration) murojaat qilingan.
+   - Xato tafsiloti: 
+     * 35-qatorda: `price_lines = "\n".join(build_service_price_lines(service))` (narx ustuni endi services modelida yo'q, u faqat barber_services modelida bor)
+     * 40-qatorda: `service.duration` ga murojaat qilingan (davomiylik ustuni ham services modelida yo'q, u barber_services modelida bor)
+   - Natija: `AttributeError: 'Services' object has no attribute 'duration'` xatoligi yuzaga keladi va bot javob bermay qoladi.
+   - Tuzatish tavsiyasi: handlers/services.py dan narx va davomiylik chaqiruvlarini olib tashlash va uning o'rniga "Ustani tanlagandan so'ng narx va davomiylik ko'rsatiladi" matnini qo'shish.
+
+2. Yangi xizmat (service) qo'shishdagi xatolik (Hal etildi):
+   - Fayl: admins/add_service.py va bazadagi services jadvali
+   - Tavsif: Yangi xizmat qo'shish jarayonida (ism kiritib, "➡️ Rasm kerak emas" yoki rasm yuborilganda) SQL xatoligi yuzaga kelayotgan edi.
+   - Xato tafsiloti: Bazadagi services jadvalida eski tizimdan qolib ketgan price va duration ustunlari NOT NULL (majburiy) holatida saqlanib qolgan edi, lekin yangi SQLAlchemy modelida ular yo'q edi. Yangi xizmat qo'shishda bu ustunlarga qiymat berilmagani uchun PostgreSQL xatolik qaytargan.
+   - Natija: Xizmat qo'shib bo'lmas edi.
+   - Bajarilgan ish: Bazadagi services jadvalidan price va duration ustunlari muvaffaqiyatli o'chirildi hamda admins/add_service.py kodi tozalab optimallashtirildi.
+
+3. Vaqt tanlash tugmalarining betartib ko'payib ketish muammosi (Hal etildi):
+   - Fayl: handlers/booking.py va keyboards/booking_keyboards.py
+   - Tavsif: Navbat olish jarayonida vaqt tanlash tugmalari juda ko'payib ketib, bir qatorda 50% / 50% tartibsiz joylashib foydalanuvchiga noqulaylik tug'dirayotgan edi.
+   - Bajarilgan ish: Agar vaqt tugmalari qatori 6 tadan oshsa (12 tadan ko'p bo'sh vaqt bo'lsa), avtomatik ravishda pagination (sahifalash) qilindi. Har bir sahifada maksimal 6 qator ko'rsatiladi va navigatsiya (oldingi/keyingi, joriy sahifa) hamda orqaga qaytish tugmalari joylashtirildi.
