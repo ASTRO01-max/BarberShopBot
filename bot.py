@@ -140,7 +140,7 @@ dp.callback_query.register(
     F.data.startswith("service_")
 )
 
-# FSM - Usta tanlash
+# FSM - Barber tanlash
 dp.callback_query.register(
     booking.booking_barber_nav,
     booking.UserState.waiting_for_barber,
