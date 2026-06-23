@@ -1,3 +1,4 @@
+# handlers/services.py
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -32,12 +33,10 @@ def service_nav_keyboard(index: int, total: int, service_id: int):
 async def send_service(callback: types.CallbackQuery, services, index: int):
     service = services[index]
     emoji = SERVICE_EMOJIS.get(service.name, "🔹")
-    price_lines = "\n".join(build_service_price_lines(service))
 
     caption = (
-        f"{emoji} <b>{service.name}</b>\n"
-        f"{price_lines}\n"
-        f"🕒 <b>Davomiyligi:</b> {service.duration}\n"
+        f"{emoji} <b>{service.name}</b>\n\n"
+        f"ℹ️ <i>Usta tanlangandan so'ng narx va davomiylik ko'rsatiladi.</i>\n"
         f"\n📌 <i>({index + 1} / {len(services)})</i>"
     )
 

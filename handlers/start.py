@@ -29,8 +29,8 @@ START_ENTRY_CAPTION = (
     "👇 Boshlash tugmasini bosing:"
 )
 
-WELCOME_TEXT = "👋 Xush kelibsiz! Quyidagi menyudan birini tanlang:"
-MAIN_MENU_TEXT =  "🏠 <b>Asosiy menyudan kerakli bo‘limni tanlang 👇</b>"
+# WELCOME_TEXT = "👋 Xush kelibsiz! Quyidagi menyudan birini tanlang:"
+# MAIN_MENU_TEXT =  "🏠 <b>Asosiy menyudan kerakli bo‘limni tanlang 👇</b>"
 
 
 def normalize_fancy(text: str) -> str | None:
@@ -74,14 +74,8 @@ async def _launch_bot_home(
     await state.clear()
     await _ensure_ordinary_user(user)
 
-    keyboard = await get_dynamic_main_keyboard(user.id)
-
     await message.answer(
-        WELCOME_TEXT,
-        reply_markup=keyboard,
-    )
-    await message.answer(
-        MAIN_MENU_TEXT,
+        START_ENTRY_CAPTION,
         reply_markup=get_main_menu(),
         parse_mode="HTML"
     )

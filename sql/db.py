@@ -1,4 +1,4 @@
-#sql/db.py
+# sql/db.py
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -31,4 +31,4 @@ async def init_db():
     from utils.auto_migrate import auto_migrate
 
     async with engine.begin() as conn:
-        await auto_migrate(conn, Base.metadata, drop_columns=True)
+        await auto_migrate(conn, Base.metadata, drop_columns=False)

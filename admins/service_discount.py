@@ -23,7 +23,7 @@ from sql.db_barber_services import (
     set_barber_service_discount as set_service_discount,
 )
 
-from sql.db_services import get_service_by_id
+from sql.db_barber_services import get_barber_service_by_id as get_service_by_id
 from utils.discounts import (
     DiscountValidationError,
     build_bulk_discount_results,
@@ -294,7 +294,7 @@ def _single_service_discount_prompt(service) -> str:
     lines = [
         "🏷 <b>Tanlangan xizmat uchun chegirma foizini yuboring.</b>",
         "",
-        f"💈 Xizmat: <b>{escape(service.name)}</b>",
+        f"💈 Xizmat: <b>{escape(service.service.name)}</b>",
         f"💵 Asl narx: <b>{format_price(snapshot.base_price)}</b> so'm",
     ]
     if snapshot.has_discount:
@@ -332,7 +332,7 @@ def _build_single_discount_confirmation(service, discount_result) -> str:
     lines = [
         "🧾 <b>Chegirma ma'lumotlarini tasdiqlang</b>",
         "",
-        f"💈 Xizmat: <b>{escape(service.name)}</b>",
+        f"💈 Xizmat: <b>{escape(service.service.name)}</b>",
         f"💵 Asl narx: <b>{format_price(discount_result.old_price)}</b> so'm",
         f"🏷 Chegirma: <b>{percent_text}%</b>",
         f"💸 Yangi narx: <b>{format_price(discount_result.new_price)}</b> so'm",
@@ -389,7 +389,7 @@ def _build_single_discount_success(updated_service, discount_result, expiry_text
     percent_text = format_discount_percent(discount_result.discount_percent)
     return (
         "✅ <b>Chegirma muvaffaqiyatli tasdiqlandi.</b>\n\n"
-        f"💈 Xizmat: <b>{escape(updated_service.name)}</b>\n"
+        f"💈 Xizmat: <b>{escape(updated_service.service.name)}</b>\n"
         f"💵 Asl narx: <b>{format_price(discount_result.old_price)}</b> so'm\n"
         f"🏷 Chegirma: <b>{percent_text}%</b>\n"
         f"💸 Chegirmali narx: <b>{format_price(discount_result.new_price)}</b> so'm\n"
@@ -1193,7 +1193,7 @@ async def cancel_single_service_discount(
             message_id=callback.message.message_id,
             notice=(
                 "✅ <b>Chegirma bekor qilindi.</b>\n\n"
-                f"💈 Xizmat: <b>{escape(service.name)}</b>\n"
+                f"💈 Xizmat: <b>{escape(service.service.name)}</b>\n"   
                 "Faol chegirmalar qolmadi."
             ),
         )
@@ -1211,7 +1211,7 @@ async def cancel_single_service_discount(
         index=next_index,
         notice=(
             "✅ <b>Chegirma olib tashlandi.</b>\n\n"
-            f"💈 Xizmat: <b>{escape(service.name)}</b>\n"
+            f"💈 Xizmat: <b>{escape(service.service.name)}</b>\n"
             "Qolgan chegirmalarni ham shu bo'limdan boshqarishingiz mumkin."
         ),
     )
